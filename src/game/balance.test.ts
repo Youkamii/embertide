@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import type { Input } from '../engine/input'
 import { Rng } from '../engine/rng'
 import { Bot } from './bot'
+import type { Choice } from './loadout'
 import { Game, Phase, RUN_SECONDS } from './game'
 
 // @types/node 를 넣으면 브라우저 코드에서도 process 가 보여 실수를 부른다.
@@ -35,6 +36,25 @@ interface RunStat {
   evolved: number
 }
 
+/**
+ * 봇의 레벨업 선택.
+ *
+ * 예전엔 "진화가 뜨면 집고 나머지는 랜덤"이었는데, 그러면 **진화가 거의 안 나온다** —
+ * 진화가 선택지에 뜨려면 무기와 짝 패시브를 둘 다 키워야 하고, 무기 12·패시브 12 에서
+ * 그걸 우연히 맞출 확률은 사실상 0이다(실측: 6판 중 3판이 진화 0).
+ *
+ * 사람은 힌트("가시와 맞물린다")를 읽고 고른다. 봇도 그러게 해야 사람 근사가 된다 —
+ * 안 그러면 봇 수치로는 조합 시스템 자체를 검증할 수 없다.
+ */
+function pickChoice(cs: Choice[], rng: Rng): Choice {
+  const evo = cs.find((c) => c.kind === 'evolve')
+  if (evo) return evo
+  // 힌트가 붙은 것(=진화에 가까워지는 것)을 우선한다
+  const synergy = cs.filter((c) => c.hint && c.hint !== '새 무기')
+  if (synergy.length > 0) return synergy[rng.int(synergy.length)]!
+  return cs[rng.int(cs.length)]!
+}
+
 /** 사람 없이 한 판 끝까지. 렌더가 없으니 5분이 순식간이다. */
 function playRun(seed: number, pickBest = false): RunStat {
   const game = new Game()
@@ -49,9 +69,7 @@ function playRun(seed: number, pickBest = false): RunStat {
     if (game.phase === Phase.LevelUp) {
       const cs = game.pendingChoices
       if (cs.length === 0) break
-      // 진화가 뜨면 무조건 집는다. 나머지는 랜덤 — 사람이라면 더 잘 고른다.
-      const evo = cs.find((c) => c.kind === 'evolve')
-      game.choose(pickBest && evo ? evo : cs[rng.int(cs.length)]!)
+      game.choose(pickBest ? pickChoice(cs, rng) : cs[rng.int(cs.length)]!)
       continue
     }
     if (game.phase === Phase.Dead || game.phase === Phase.Won) break
