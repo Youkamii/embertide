@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#05060a" />
+    <title>EMBERTIDE</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #05060a;
+        font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+        color: #e8e3d8;
+        -webkit-font-smoothing: antialiased;
+      }
+      #gl {
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+        cursor: crosshair;
+      }
+      #ui {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        user-select: none;
+      }
+      #fatal {
+        position: fixed;
+        inset: 0;
+        display: none;
+        place-content: center;
+        text-align: center;
+        padding: 2rem;
+        background: #05060a;
+        line-height: 1.7;
+      }
+      #fatal.show { display: grid; }
+      #fatal b { color: #ff8a3d; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <div id="ui"></div>
+    <div id="fatal">
+      <div>
+        <b>EMBERTIDE</b> 를 실행할 수 없습니다.<br />
+        <span id="fatal-msg"></span>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
