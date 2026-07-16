@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:single": "vite build && node scripts/build-single.mjs",
     "preview": "vite preview",
     "check": "tsc --noEmit",
     "test": "vitest run"
