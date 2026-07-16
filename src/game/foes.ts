@@ -254,8 +254,20 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
     // ── 지형: 길을 찾지 않고 갉아먹는다.
     // 2만 마리에 경로탐색은 불가능하고, 파괴로 풀면 오히려 전술이 생긴다.
     if (terrain !== null && terrain.solidAt(nx, ny)) {
-      // 진행 방향 앞쪽 셀을 문다
-      terrain.damageAt(nx + dx * stat.radius, ny + dy * stat.radius, stat.gnaw * dt, time)
+      // 진행 방향 앞쪽 셀을 문다.
+      // **적이 잔해를 터뜨려선 안 된다** — 그러면 내가 파러 가기도 전에 공짜로 열리고,
+      // 위험/보상 선택이 그냥 시간 문제가 된다. 적은 잔해 셀을 못 부순다(hp 를 남긴다).
+      const gx = nx + dx * stat.radius
+      const gy = ny + dy * stat.radius
+      const gcx = terrain.cellX(gx)
+      const gcy = terrain.cellY(gy)
+      if (terrain.inBounds(gcx, gcy) && terrain.cache[gcy * terrain.cols + gcx] === 1) {
+        // 잔해 셀은 1 아래로 안 내려간다 — 파는 건 플레이어의 몫이다
+        const cur = terrain.hpAt(gcx, gcy)
+        if (cur > 1) terrain.damageCell(gcx, gcy, Math.min(stat.gnaw * dt, cur - 1), time)
+      } else {
+        terrain.damageAt(gx, gy, stat.gnaw * dt, time)
+      }
       if (terrain.resolveCircle(nx, ny, stat.radius, scratch)) {
         nx = scratch[0]!
         ny = scratch[1]!

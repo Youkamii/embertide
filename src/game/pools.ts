@@ -312,8 +312,8 @@ export class Fields extends PoolBase {
 export const Drop = {
   Xp: 0,
   Heal: 1,
-  Magnet: 2, // 화면의 모든 XP를 빨아들인다
-  Nuke: 3, // 화면 정리
+  /** 별의 잔해 — 지형에 묻혀 있다. 파내야 나오고, 크게 준다. */
+  Cache: 2,
 } as const
 export type DropType = (typeof Drop)[keyof typeof Drop]
 

@@ -8,6 +8,7 @@ import {
   ACT_INTRO_SECONDS, ACT_SECONDS, ACTS, BOSS_AT, RUN_SECONDS, actIndexAt, actProgressAt,
   type ActDef,
 } from './acts'
+import type { SpriteBatch } from '../engine/batch'
 import type { SfxName } from '../engine/audio'
 import { Camera } from '../engine/camera'
 import { SpatialHash } from '../engine/grid'
@@ -21,6 +22,7 @@ import { Shape } from '../engine/shapes'
 import { burst, shockwave, smoke, spray, updateMotes } from './fx'
 import { drawHealthRing, drawOffscreenMarker, drawXpArc } from './hud3d'
 import { FOE_STATS, foeRotation, spawnCluster, spawnRing, updateFoes } from './foes'
+import { Boss, BossState } from './boss'
 import { Loadout, type Choice } from './loadout'
 import { Player } from './player'
 import { CELL, Terrain } from './terrain'
@@ -111,9 +113,8 @@ export class Game implements FireCtx {
   actIntro = 0
   /** 이번 막 보스가 이미 나왔는가 */
   private bossSpawned = false
-  /** 보스 엔티티 인덱스 (-1 = 없음). HUD 체력바가 읽는다. */
-  bossIdx = -1
-  bossMaxHp = 0
+  /** 보스 — 패턴 상태기계. 한 번에 하나뿐이라 객체를 써도 hot path 를 안 건드린다. */
+  readonly boss = new Boss()
 
   phase: PhaseType = Phase.Playing
   elapsed = 0
@@ -160,7 +161,7 @@ export class Game implements FireCtx {
     this.act = 0
     this.actIntro = ACT_INTRO_SECONDS
     this.bossSpawned = false
-    this.bossIdx = -1
+    this.boss.reset()
     this.echoDepth = 0
     // 지형은 시드에서 나온다. 같은 시드 = 같은 맵.
     this.terrain.generate(seed, WORLD_R, 1)
@@ -342,7 +343,7 @@ export class Game implements FireCtx {
       this.act = nowAct
       this.actIntro = ACT_INTRO_SECONDS
       this.bossSpawned = false
-      this.bossIdx = -1
+      this.boss.reset()
       // 막이 바뀌는 순간이 곧 이정표다 — 화면과 소리가 같이 알려야 한다
       shockwave(this.motes, this.player.x, this.player.y, 420, EVENT * 0.7, EVENT * 0.6, 0.8, 1.4)
       this.camera.shake(10, 5)
@@ -356,7 +357,115 @@ export class Game implements FireCtx {
     }
 
     // 보스가 죽었으면 표시를 지운다
-    if (this.bossIdx >= 0 && this.foes.alive[this.bossIdx] === 0) this.bossIdx = -1
+    if (this.boss.idx >= 0 && this.foes.alive[this.boss.idx] === 0) this.boss.reset()
+    this.tickBoss(dt)
+  }
+
+  /**
+   * 보스 패턴 한 틱.
+   *
+   * updateFoes 가 이미 보스를 "플레이어를 향해 걷는 잔챙이"로 움직였다. 여기서
+   * 그 위에 덮어쓴다 — 별도 AI 루프를 만들면 hot path 에 분기가 늘고, 보스는
+   * 하나뿐이라 그럴 값어치가 없다.
+   */
+  private tickBoss(dt: number): void {
+    const boss = this.boss
+    if (boss.idx < 0) return
+    const j = boss.idx
+    const foes = this.foes
+    if (foes.alive[j] === 0) {
+      boss.reset()
+      return
+    }
+
+    const bx = foes.x[j]!
+    const by = foes.y[j]!
+    const hpFrac = foes.hp[j]! / boss.maxHp
+    const entered = boss.tick(dt, this.rng, hpFrac)
+
+    // 상태에 **들어선 순간**에만 하는 일
+    if (entered !== null) {
+      switch (entered) {
+        case BossState.Aim: {
+          // 조준을 확정한다. 이 시점의 플레이어 위치로 — 그래서 예고 중에
+          // 옆으로 비키면 피할 수 있다. 계속 따라오면 그건 예고가 아니다.
+          const dx = this.player.x - bx
+          const dy = this.player.y - by
+          const d = Math.hypot(dx, dy) || 1
+          boss.dirX = dx / d
+          boss.dirY = dy / d
+          this.sfx('bolt')
+          break
+        }
+        case BossState.Charge:
+          this.camera.shake(7, 10)
+          this.sfx('nova')
+          break
+        case BossState.Stagger:
+          // 빈틈에 들어섰다는 걸 알려야 딜 기회로 읽힌다
+          shockwave(this.motes, bx, by, 150, 1.4, 1.2, 0.4, 0.5)
+          this.sfx('kill')
+          break
+        case BossState.Summon: {
+          // 자기 주위에 잔챙이를 뿌린다 — 보스에게만 매달리면 둘러싸인다
+          const n = 6 + this.act * 3
+          for (let k = 0; k < n; k++) {
+            spawnRing(
+              foes, Foe.Husk, bx, by, 60, 190,
+              ACTS[this.act]!.hp * 0.6, this.randFn, WORLD_R,
+            )
+          }
+          shockwave(this.motes, bx, by, 220, 1.6, 0.6, 0.2, 0.6)
+          this.sfx('evolve')
+          break
+        }
+        case BossState.Collapse:
+          // 수축장: 지금 플레이어가 선 자리를 중심으로 링이 좁혀온다.
+          // 서 있으면 죽고, 뛰면 산다.
+          boss.ringX = this.player.x
+          boss.ringY = this.player.y
+          boss.ringR = 520
+          this.sfx('nova')
+          break
+      }
+    }
+
+    // 상태가 **유지되는 동안** 하는 일
+    switch (boss.state) {
+      case BossState.Charge: {
+        // updateFoes 의 추격을 덮어쓴다 — 돌진은 조준한 직선으로만 간다
+        const sp = FOE_STATS[foes.type[j]!]!.speed * boss.speedScale()
+        foes.vx[j] = boss.dirX * sp
+        foes.vy[j] = boss.dirY * sp
+        // 지나간 자리에 흔적
+        burst(this.motes, bx, by, 2, 1.6, 0.5, 0.2, 90, 0.24, 5)
+        break
+      }
+      case BossState.Aim:
+      case BossState.Stagger: {
+        // 멈춘다. 예고는 읽을 시간이고 빈틈은 딜 기회다.
+        foes.vx[j] = 0
+        foes.vy[j] = 0
+        break
+      }
+      case BossState.Collapse: {
+        // 링이 좁혀온다. 밖에 있으면 안전, 링에 닿으면 아프다.
+        boss.ringR = Math.max(70, boss.ringR - 210 * dt)
+        const pd = Math.hypot(this.player.x - boss.ringX, this.player.y - boss.ringY)
+        if (Math.abs(pd - boss.ringR) < 34 && this.player.hurt(16)) {
+          this.camera.shake(11, 10)
+          this.sfx('hurt')
+        }
+        break
+      }
+      default: {
+        const sc = boss.speedScale()
+        if (sc !== 1) {
+          foes.vx[j]! *= sc
+          foes.vy[j]! *= sc
+        }
+      }
+    }
   }
 
   /** 막의 가중치 표에서 종족 하나. */
@@ -383,8 +492,7 @@ export class Game implements FireCtx {
       700, 820, hp / (FOE_STATS[act.boss]!.hp || 1), this.randFn, WORLD_R,
     )
     if (i < 0) return
-    this.bossIdx = i
-    this.bossMaxHp = this.foes.hp[i]!
+    this.boss.spawn(i, this.foes.hp[i]!)
     // 보스는 화면에서 즉시 구분돼야 한다
     shockwave(this.motes, this.foes.x[i]!, this.foes.y[i]!, 260, EVENT * 0.8, 0.4, 0.6, 1.2)
     burst(this.motes, this.foes.x[i]!, this.foes.y[i]!, 34, EVENT * 0.8, 0.5, 0.7, 400, 1.0, 9, Shape.Crown)
@@ -492,9 +600,34 @@ export class Game implements FireCtx {
         if (dx * dx + dy * dy > radius * radius) continue
         if (t.damageCell(cx, cy, power, this.elapsed)) {
           smoke(this.motes, wx, wy, 2, 0.3, 0.24, 0.2, 10)
+          this.reapCache(wx, wy)
         }
       }
     }
+  }
+
+  /**
+   * 지형이 부서진 자리에 잔해가 있었으면 보상을 터뜨린다.
+   *
+   * 지형을 부수는 경로가 여러 개(탄·혜성·적)라, 각자 확인하게 하면 언젠가 빠뜨린다.
+   * Terrain.brokeCache 플래그를 여기서 한 번만 소비한다.
+   */
+  private reapCache(x: number, y: number): void {
+    if (!this.terrain.brokeCache) return
+    this.terrain.brokeCache = false
+    // 크게 준다 — 파는 데 시간이 걸렸고 그동안 적이 몰려왔다. 위험의 대가다.
+    const value = 26 + this.act * 14
+    for (let k = 0; k < 7; k++) {
+      const a = this.rng.next() * Math.PI * 2
+      const sp = 60 + this.rng.next() * 140
+      this.drops.spawn(x, y, Math.cos(a) * sp, Math.sin(a) * sp, value, Drop.Xp)
+    }
+    // 회복도 하나. 잔해가 곧 보급이라 "파러 갈 이유"가 XP 하나로는 약하다.
+    this.drops.spawn(x, y, 0, 0, 28, Drop.Heal)
+    shockwave(this.motes, x, y, 120, EVENT * 0.6, EVENT * 0.5, 0.4, 0.7)
+    burst(this.motes, x, y, 16, 1.6, 1.4, 0.5, 260, 0.7, 6, Shape.Star)
+    this.camera.shake(6, 12)
+    this.sfx('levelup')
   }
 
   // ── 지속 효과체 ──────────────────────────────────────────────────────
@@ -573,6 +706,68 @@ export class Game implements FireCtx {
   }
 
   /**
+   * 보스 예고 렌더.
+   *
+   * 패턴은 **보여야** 패턴이다. 안 보이면 무작위 사고고, 그러면 플레이어는
+   * 배울 게 없어서 15분에 5번 다 똑같이 당한다.
+   */
+  private drawBossTells(
+    b: SpriteBatch, x: number, y: number, size: number, t: number,
+  ): void {
+    const boss = this.boss
+    const tel = boss.telegraph()
+
+    switch (boss.state) {
+      case BossState.Aim: {
+        // 돌진 경로를 바닥에 깐다. 차오를수록 밝아진다 — 언제 튀는지 읽힌다.
+        const len = 900
+        const k = ACCENT * tel
+        for (let s = 0; s < 22; s++) {
+          const f = s / 22
+          b.push(
+            x + boss.dirX * len * f, y + boss.dirY * len * f,
+            size * 0.5 * (1 - f * 0.5), Math.atan2(boss.dirY, boss.dirX),
+            k, k * 0.28, 0.1, 1, Shape.Spark,
+          )
+        }
+        break
+      }
+      case BossState.Charge: {
+        // 돌진 중엔 앞이 타오른다
+        b.push(
+          x + boss.dirX * size, y + boss.dirY * size, size * 1.2,
+          Math.atan2(boss.dirY, boss.dirX), ACCENT * 1.4, 0.7, 0.2, 1, Shape.Comet,
+        )
+        break
+      }
+      case BossState.Stagger: {
+        // 빈틈 — 초록으로 "지금 때려라"
+        const p = 0.7 + Math.sin(t * 12) * 0.3
+        b.push(x, y, size * 1.9, -t * 2, 0.2 * p, ACCENT * p, 0.4 * p, 1, Shape.Ring)
+        break
+      }
+      case BossState.Summon: {
+        const p = ACCENT * tel
+        b.push(x, y, size * (1.4 + tel * 1.2), t * 4, p, p * 0.4, 0.15, 1, Shape.Sigil)
+        break
+      }
+      case BossState.Collapse: {
+        // 좁혀오는 링. 이게 안 보이면 그냥 알 수 없는 피해다.
+        const R = boss.ringR
+        const seg = 56
+        for (let s = 0; s < seg; s++) {
+          const a = (s / seg) * Math.PI * 2
+          b.push(
+            boss.ringX + Math.cos(a) * R, boss.ringY + Math.sin(a) * R,
+            13, a, ACCENT, 0.3, 0.16, 1, Shape.Orb,
+          )
+        }
+        break
+      }
+    }
+  }
+
+  /**
    * 반경 폭발 — 여러 무기가 공유하는 입구.
    *
    * 여기서 죽은 적이 반향을 낳고 그 반향이 또 explode 를 부른다(재귀).
@@ -630,7 +825,10 @@ export class Game implements FireCtx {
         } else {
           const broke = this.terrain.damageAt(x, y, shots.damage[i]! * 1.6, this.elapsed)
           smoke(this.motes, x, y, broke ? 3 : 1, 0.3, 0.24, 0.2, broke ? 12 : 7)
-          if (broke) this.camera.shake(1.6, 20)
+          if (broke) {
+            this.camera.shake(1.6, 20)
+            this.reapCache(x, y)
+          }
           shots.kill(i)
           continue
         }
@@ -715,6 +913,8 @@ export class Game implements FireCtx {
     const foes = this.foes
     const s = this.player.stats
     let dmg = damage * foes.frail[j]!
+    // 보스 빈틈은 딜 기회다 — 피한 보상이 없으면 패턴을 읽을 이유가 없다
+    if (j === this.boss.idx) dmg *= this.boss.damageScale()
     if (this.rng.next() < s.critChance) dmg *= s.critMult
 
     foes.hp[j]! -= dmg
@@ -884,6 +1084,12 @@ export class Game implements FireCtx {
           (v + tint) * lit, (v + tint) * lit, (v * 1.1 + tint) * lit, 1,
           frac < 0.45 ? Shape.Crack : Shape.Hex,
         )
+        // 잔해 표식 — **보여야 갈 이유가 된다**. 지형은 무채색이므로 여기만
+        // 금색이면 멀리서도 "저기 뭔가 있다"가 읽힌다.
+        if (ter.cache[ci] === 1) {
+          const g2 = 0.55 + Math.sin(t * 3 + ci) * 0.25
+          b.push(wx, wy, CELL * 0.34, t * 1.2, g2 * 1.5, g2 * 1.2, g2 * 0.2, 1, Shape.Star)
+        }
       }
     }
 
@@ -937,7 +1143,7 @@ export class Game implements FireCtx {
       const dy = y - cy
       if (dx * dx + dy * dy > cullR2) continue
 
-      const isBoss = i === this.bossIdx
+      const isBoss = i === this.boss.idx
       const stat = FOE_STATS[foes.type[i]!]!
       const flash = foes.flash[i]!
       // 맞은 순간 밝아진다. 이거 하나로 타격감이 사는데, 배율이 크면 후반에
@@ -963,6 +1169,7 @@ export class Game implements FireCtx {
       if (isBoss) {
         b.push(x, y, size * 1.5, t * 0.7, 1.6, 0.9, 0.28, 1, Shape.Halo)
         b.push(x, y + size * 1.3, size * 0.7, Math.sin(t * 2) * 0.12, 1.9, 1.4, 0.5, 1, Shape.Crown)
+        this.drawBossTells(b, x, y, size, t)
       }
     }
 
@@ -1084,10 +1291,10 @@ export class Game implements FireCtx {
       drawXpArc(b, p.x, p.y, p.xp / p.xpNeeded)
 
       // 화면 밖 보스 — 어디서 오는지 모르면 "갑자기 죽었다"가 된다
-      if (this.bossIdx >= 0 && foes.alive[this.bossIdx] === 1) {
+      if (this.boss.idx >= 0 && foes.alive[this.boss.idx] === 1) {
         drawOffscreenMarker(
           b, cam.x, cam.y, 1 / view.sx, 1 / view.sy,
-          foes.x[this.bossIdx]!, foes.y[this.bossIdx]!,
+          foes.x[this.boss.idx]!, foes.y[this.boss.idx]!,
           ACCENT, 0.5, 0.2, t,
         )
       }

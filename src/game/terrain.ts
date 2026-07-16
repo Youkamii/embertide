@@ -23,6 +23,14 @@ export class Terrain {
   readonly flash: Float32Array
   /** 렌더 색을 흔드는 셀별 고정 난수 */
   readonly tint: Float32Array
+  /**
+   * 별의 잔해가 묻힌 셀. 0 = 없음, 1 = 있음.
+   *
+   * 이게 있어야 이동에 이유가 생긴다. 지금까지는 어디로 가든 똑같아서 "도망"만이
+   * 유일한 이동 동기였다 — 지도에 가치가 있어야 "지금 어디로 갈까"가 결정이 된다.
+   * 파내려면 시간이 걸리고 그동안 적이 몰려오므로, 그게 곧 위험/보상 선택이다.
+   */
+  readonly cache: Uint8Array
 
   constructor(worldR: number) {
     const size = Math.ceil((worldR * 2) / CELL) + 2
@@ -35,6 +43,7 @@ export class Terrain {
     this.maxHp = new Float32Array(n)
     this.flash = new Float32Array(n)
     this.tint = new Float32Array(n)
+    this.cache = new Uint8Array(n)
   }
 
   private idx(cx: number, cy: number): number {
@@ -66,7 +75,13 @@ export class Terrain {
     return this.hp[this.idx(cx, cy)]!
   }
 
-  /** 셀을 때린다. 부쉈으면 true. */
+  /**
+   * 셀을 때린다. 부쉈으면 true.
+   * 잔해가 있던 셀이면 cache 를 0으로 소비하고 brokeCache 에 표시한다 —
+   * 호출자가 그 자리에 보상을 놓는다.
+   */
+  brokeCache = false
+
   damageCell(cx: number, cy: number, amount: number, time: number): boolean {
     if (!this.inBounds(cx, cy)) return false
     const i = this.idx(cx, cy)
@@ -75,6 +90,10 @@ export class Terrain {
     this.flash[i] = time
     if (this.hp[i]! <= 0) {
       this.hp[i] = 0
+      if (this.cache[i] === 1) {
+        this.cache[i] = 0
+        this.brokeCache = true
+      }
       return true
     }
     return false
@@ -185,6 +204,7 @@ export class Terrain {
     this.hp.fill(0)
     this.maxHp.fill(0)
     this.flash.fill(-999)
+    this.cache.fill(0)
     for (let cy = 0; cy < rows; cy++) {
       for (let cx = 0; cx < cols; cx++) {
         const i = cy * cols + cx
@@ -203,8 +223,18 @@ export class Terrain {
         this.hp[i] = h
         this.maxHp[i] = h
         this.tint[i] = rng.next()
+        // 잔해는 **두꺼운 곳**에 묻힌다. 겉껍질에 있으면 파는 맛도 위험도 없다.
+        // 시드가 정하므로 같은 시드면 같은 자리 — 데일리에서 "저기 있다"가 성립한다.
+        if (n >= 8 && rng.next() < 0.055) this.cache[i] = 1
       }
     }
+  }
+
+  /** 잔해가 묻힌 셀 수 — 테스트/디버그용 */
+  cacheCount(): number {
+    let n = 0
+    for (let i = 0; i < this.cache.length; i++) if (this.cache[i] === 1) n++
+    return n
   }
 
   /**

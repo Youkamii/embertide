@@ -224,8 +224,8 @@ function boot(): void {
       })
       .join(' ')
     const act = ACTS[game.act]!
-    const bossHp = game.bossIdx >= 0 && game.bossMaxHp > 0
-      ? Math.max(0, Math.round((game.foes.hp[game.bossIdx]! / game.bossMaxHp) * 100))
+    const bossHp = game.boss.idx >= 0 && game.boss.maxHp > 0
+      ? Math.max(0, Math.round((game.foes.hp[game.boss.idx]! / game.boss.maxHp) * 100))
       : -1
     hud.textContent =
       `${game.act + 1}막 ${act.name}\n` +

@@ -179,3 +179,60 @@ function t_solidNear(t: Terrain, x: number, y: number, r: number): boolean {
   }
   return false
 }
+
+describe('별의 잔해', () => {
+  it('시드마다 잔해가 있다 (없으면 이동에 이유가 없다)', () => {
+    for (const s of SEEDS) {
+      const n = build(s).cacheCount()
+      expect(n, `seed ${s}`).toBeGreaterThan(3)
+      expect(n, `seed ${s} 너무 많다`).toBeLessThan(400)
+    }
+  })
+
+  it('같은 시드 = 같은 자리 (데일리에서 "저기 있다"가 성립해야 한다)', () => {
+    const a = build(42)
+    const b = build(42)
+    expect(Array.from(a.cache)).toEqual(Array.from(b.cache))
+    expect(Array.from(build(7).cache)).not.toEqual(Array.from(a.cache))
+  })
+
+  it('잔해는 단단한 곳에만 묻힌다 (허공에 뜬 보상은 파는 맛이 없다)', () => {
+    for (const s of [1, 42, 1337]) {
+      const t = build(s)
+      for (let i = 0; i < t.cache.length; i++) {
+        if (t.cache[i] === 1) expect(t.hp[i], `seed ${s} cell ${i}`).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it('부수면 표시가 뜨고 한 번만 소비된다', () => {
+    const t = build(42)
+    let found = -1
+    for (let i = 0; i < t.cache.length; i++) if (t.cache[i] === 1) { found = i; break }
+    expect(found).toBeGreaterThanOrEqual(0)
+    const cx = found % t.cols
+    const cy = (found / t.cols) | 0
+
+    t.brokeCache = false
+    let broke = false
+    for (let k = 0; k < 500 && !broke; k++) broke = t.damageCell(cx, cy, 5, 1)
+    expect(broke).toBe(true)
+    expect(t.brokeCache).toBe(true)
+    expect(t.cache[found]).toBe(0)
+
+    // 두 번 터지면 보상이 무한이 된다
+    t.brokeCache = false
+    t.damageCell(cx, cy, 5, 1)
+    expect(t.brokeCache).toBe(false)
+  })
+
+  it('generate 를 다시 부르면 잔해도 새로 깔린다 (재시작 시 이전 판이 남으면 안 된다)', () => {
+    const t = new Terrain(WORLD_R)
+    t.generate(42, WORLD_R, 1)
+    const before = t.cacheCount()
+    // 다 파낸 척
+    t.cache.fill(0)
+    t.generate(42, WORLD_R, 1)
+    expect(t.cacheCount()).toBe(before)
+  })
+})
