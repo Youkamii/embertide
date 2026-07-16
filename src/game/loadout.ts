@@ -172,7 +172,12 @@ export class Loadout {
     }
 
     // 시너지에 걸린 선택지를 더 자주 띄운다. 조합이 안 굴러가면 매판 똑같아진다.
-    const weights = pool.map((c) => (c.hint && c.hint !== '새 무기' ? 3.4 : 1))
+    //
+    // 가중치를 3.4 로 뒀는데, 무기 6→12·패시브 6→12 로 늘리자 풀이 2배가 되면서
+    // 짝이 맞을 확률이 절반이 됐다 — 봇 6판에서 **평균 진화 0.3** (2판만 딱 1번).
+    // 진화가 이 게임 조합의 정점인데 15분을 버텨도 못 보면 시스템이 없는 것과 같다.
+    // 풀이 커진 만큼 유인도 세게 준다.
+    const weights = pool.map((c) => (c.hint && c.hint !== '새 무기' ? 7 : 1))
     while (out.length < count && pool.length > 0) {
       const pick = rng.weighted(weights)
       if (pick < 0) break

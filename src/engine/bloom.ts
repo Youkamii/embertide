@@ -139,6 +139,10 @@ void main() {
   vec3 bloom = texture(u_bloom, uv).rgb;
   vec3 color = scene + bloom * u_bloomStrength;
 
+  // 노출. 발광체가 수천 개 겹치는 게임이라 ACES 에 그대로 넣으면 상단이 다 1.0 으로
+  // 뭉개진다. 눌러서 넣고 톤매퍼가 굴리게 한다.
+  color *= 0.62;
+
   // 피격 시 붉게 물듦. 화면 전체를 덮으면 정작 피해야 할 적이 안 보이므로
   // 가장자리(비네트 쪽)만 강하게 물들이고 가운데는 살려 둔다.
   float hurtMask = u_hurt * (0.16 + smoothstep(0.02, 0.22, r2) * 0.46);
@@ -169,9 +173,12 @@ export interface BloomSettings {
 }
 
 export const DEFAULT_BLOOM: BloomSettings = {
-  threshold: 0.72,
-  knee: 0.45,
-  strength: 1.15,
+  // 후반에 적 2,500마리가 몰리면 발광이 겹쳐 누적돼 화면이 통째로 하얗게 탄다(실측).
+  // 임계값을 올리고 세기를 낮춰야 "밝은 것"이 밝게 보인다 — 전부 밝으면 아무것도
+  // 안 밝은 것과 같다.
+  threshold: 1.05,
+  knee: 0.5,
+  strength: 0.78,
   radius: 1.0,
   aberration: 0.02,
   grain: 0.055,
