@@ -150,7 +150,9 @@ export const WEAPONS: readonly WeaponDef[] = [
     evoName: '천벌', evoDesc: '줄기가 갈라져 스스로 겨눈다',
     // 1.9였을 때 시작 무기로 성립하지 않았다: 줄기당 3~5킬 × 0.53발/s ≈ 2킬/s 인데
     // 초반 유입이 6~13/s 라 순수하게 산수에서 진다 — 봇이 51킬로 24s 사망(10종 중 유일).
-    evoPassive: P.Pierce, cooldown: 1.35,
+    // 1.35로 살렸는데 블랙홀 개편(시작점 이동 → 스폰 지리 재추첨)에서 같은 산수로
+    // 다시 죽었다(29s, 포위 밀도에 화력이 밀림). 한 줄기 무기의 구조적 하한이다.
+    evoPassive: P.Pierce, cooldown: 1.22,
     r: 1.00, g: 0.78, b: 0.34, shape: Shape.Prism, maxLevel: 8,
   },
   {

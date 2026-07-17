@@ -125,6 +125,16 @@ export interface FoeUpdateCtx {
   readonly bossIdx: number
   /** 전 적 이동 배율 — 계약(Ash Wind 류)이 올린다. 1 = 평소. */
   readonly speedMul: number
+  /** 사건의 지평선 반지름. 세계 중심의 블랙홀 — 넘으면 삼켜진다. */
+  readonly holeR: number
+  /** 지평선 위(d=holeR)에서의 중력 가속(px/s). 거리에 반비례로 줄어든다. */
+  readonly holePull: number
+  /**
+   * 이번 틱에 지평선을 넘어 삼켜진 적 인덱스. deadOut 과 분리한 이유:
+   * 삼켜짐은 **보상이 없다** — killFoe(XP·연출·반향)를 타면 안 된다.
+   * 적을 지평선으로 밀어 넣는 건 공짜 청소지 사냥이 아니다.
+   */
+  readonly eatenOut: Int32Array
 }
 
 export interface FoeUpdateResult {
@@ -143,18 +153,25 @@ export interface FoeUpdateResult {
   contactCount: number
   /** deadOut 에 담긴 유효 개수 */
   deadCount: number
+  /** eatenOut 에 담긴 유효 개수 (블랙홀이 삼킨 수) */
+  eatenCount: number
 }
 
 /** 프레임당 1회만 만들어지므로 객체 반환이 GC 를 건드리지 않는다. */
-const result: FoeUpdateResult = { contactDamage: 0, contactCount: 0, deadCount: 0 }
+const result: FoeUpdateResult = { contactDamage: 0, contactCount: 0, deadCount: 0, eatenCount: 0 }
 
 /** resolveCircle 결과를 받는 스크래치. 프레임당 수만 번 불리므로 재사용한다. */
 const scratch = new Float32Array(2)
 
 /** 군체 한 틱. */
 export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateResult {
-  const { foes, hash, playerX, playerY, dt, time, worldR, deadOut, terrain, bossIdx, speedMul } = ctx
+  const {
+    foes, hash, playerX, playerY, dt, time, worldR, deadOut, terrain, bossIdx, speedMul,
+    holeR, holePull, eatenOut,
+  } = ctx
   let deadCount = 0
+  let eatenCount = 0
+  const holeR2 = holeR * holeR
   const high = foes.high
   const alive = foes.alive
   const xs = foes.x
@@ -302,6 +319,29 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
       ny *= inv
     }
 
+    // ── 블랙홀: 전역 중력과 사건의 지평선.
+    // 지수 1(역거리) — pow 는 2만 마리 hot path 에서 예산을 태운다. 평시 계수(58)는
+    // 적 최저 속도(88)보다 낮아 스스로 걷는 적은 안 삼켜진다 — 삼켜지는 건
+    // 포식(중력 펄스) 때의 스펙터클이거나, 넉백으로 밀어 넣었을 때다.
+    if (rr < holeR2) {
+      if (i === bossIdx) {
+        // 보스는 삼켜지지 않는다 — 막의 고비가 허무로 끝나면 안 된다. 지평선을 탄다.
+        const inv = holeR / Math.max(1, Math.sqrt(rr))
+        nx *= inv
+        ny *= inv
+      } else {
+        xs[i] = nx
+        ys[i] = ny
+        if (eatenCount < eatenOut.length) eatenOut[eatenCount++] = i
+        continue // 이미 삼켜졌다 — 접촉·타이머는 의미가 없다
+      }
+    } else if (holePull > 0) {
+      const cd = Math.sqrt(rr)
+      const g = (holePull * holeR) / cd * dt
+      nx -= (nx / cd) * g
+      ny -= (ny / cd) * g
+    }
+
     // 몸 반경. 보스는 렌더가 3.4배라 **모든 판정**(지형·접촉)이 같은 반경을 써야 한다 —
     // 접촉·무기 판정만 고치고 지형을 빼먹어서 보스 몸통이 벽에 ~65px 파묻혀 보였다.
     const bodyR = i === bossIdx ? stat.radius * BOSS_SCALE : stat.radius
@@ -359,6 +399,7 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
   result.contactDamage = contactDamage
   result.contactCount = contactCount
   result.deadCount = deadCount
+  result.eatenCount = eatenCount
   return result
 }
 
@@ -377,10 +418,13 @@ let ringY = 0
  * 월드 밖이면 반대편으로 접는다 — 안 그러면 경계 근처에서 스폰이 한쪽으로 쏠린다.
  * (spawnRing/spawnCluster 에 7줄이 verbatim 복붙돼 있었고, 접는 이유 주석이 한쪽에만
  * 남아 이미 열화가 시작돼 있었다 — #9)
+ *
+ * holeGuard: 이 반경 안(블랙홀)엔 놓지 않는다 — 태어나자마자 삼켜지는 스폰은 낭비고,
+ * rand 를 더 소비하지 않고 좌표만 밀어야 난수 스트림이 한 비트도 안 변한다.
  */
 function rollRingPos(
   cx: number, cy: number, ringMin: number, ringMax: number,
-  rand: () => number, worldR: number,
+  rand: () => number, worldR: number, holeGuard = 0,
 ): void {
   const a = rand() * Math.PI * 2
   const d = ringMin + rand() * (ringMax - ringMin)
@@ -389,6 +433,14 @@ function rollRingPos(
   if (Math.hypot(x, y) > worldR * 0.97) {
     x = cx - Math.cos(a) * d
     y = cy - Math.sin(a) * d
+  }
+  if (holeGuard > 0) {
+    const cr = Math.hypot(x, y)
+    if (cr < holeGuard) {
+      const s = holeGuard / Math.max(1, cr)
+      x *= s
+      y *= s
+    }
   }
   ringX = x
   ringY = y
@@ -410,8 +462,9 @@ export function spawnCluster(
   spread: number,
   rand: () => number,
   worldR: number,
+  holeGuard = 0,
 ): number {
-  rollRingPos(cx, cy, ringMin, ringMax, rand, worldR)
+  rollRingPos(cx, cy, ringMin, ringMax, rand, worldR, holeGuard)
   const bx = ringX
   const by = ringY
   const stat = FOE_STATS[type]!
@@ -438,8 +491,9 @@ export function spawnRing(
   hpScale: number,
   rand: () => number,
   worldR: number,
+  holeGuard = 0,
 ): number {
-  rollRingPos(cx, cy, ringMin, ringMax, rand, worldR)
+  rollRingPos(cx, cy, ringMin, ringMax, rand, worldR, holeGuard)
   const stat = FOE_STATS[type]!
   return foes.spawn(ringX, ringY, type, stat.hp * hpScale, rand())
 }
@@ -460,6 +514,7 @@ export function spawnFormation(
   hpScale: number,
   rand: () => number,
   worldR: number,
+  holeGuard = 0,
 ): void {
   const stat = FOE_STATS[type]!
   const dirX = Math.cos(bearing)
@@ -489,6 +544,11 @@ export function spawnFormation(
     const rr = Math.hypot(x, y)
     if (rr > worldR * 0.95) {
       const s = (worldR * 0.95) / rr
+      x *= s
+      y *= s
+    } else if (holeGuard > 0 && rr < holeGuard) {
+      // 블랙홀 안이면 바깥으로 — 진형 일부가 잘려도 삼켜지는 것보단 낫다
+      const s = holeGuard / Math.max(1, rr)
       x *= s
       y *= s
     }

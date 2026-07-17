@@ -110,7 +110,12 @@ export class Terrain {
    * → 연결되지 않은 구역을 뚫어 준다. 갇히는 시드가 하나라도 있으면 그 판은 사기다.
    */
   // hardness 인자가 있었지만 모든 호출자가 1을 넘겨 no-op 이었다 (#9) — 지웠다.
-  generate(seed: number, worldR: number): void {
+  /**
+   * startX/startY: 플레이어 시작점 — 세계 중심에 블랙홀이 생기면서 시작점이
+   * 중심을 떠났다. holeClearR: 이 반경 안은 짓지 않는다(사건의 지평선 + 성장분).
+   * 지평선 안 지형은 어차피 안 보이고, 걸치면 충돌만 남아 유령 벽이 된다.
+   */
+  generate(seed: number, worldR: number, startX = 0, startY = 0, holeClearR = 0): void {
     const rng = new Rng(seed ^ 0x7e44a1)
     const { cols, rows } = this
     const solid = new Uint8Array(cols * rows)
@@ -181,14 +186,18 @@ export class Terrain {
     //    넓게 비우는 게 중요하다. 좁게 비우면 시작 지점이 **요새**가 된다 —
     //    적은 벽을 갉느라 느리고 그동안 자동 무기가 다 죽여서, 가만히 서 있어도
     //    5분을 완주했다(실측). 조작이 필요 없는 게임은 게임이 아니다.
-    const cx0 = this.cellX(0)
-    const cy0 = this.cellY(0)
-    const clearR = 13
+    const cx0 = this.cellX(startX)
+    const cy0 = this.cellY(startY)
+    // 13이던 것을 15로 — 시작점이 궤도(0,1050)로 옮겨지며 지형이 통째로 재추첨됐고,
+    // 광선·위성 시드가 초반 포위 과밀(근접 40~70)로 넘어졌다(earlygame 계측).
+    // 기동 공간을 넓히는 건 "좁게 비우면 요새" 교훈의 안전한 방향이다.
+    const clearR = 15
     for (let cy = 0; cy < rows; cy++) {
       for (let cx = 0; cx < cols; cx++) {
         const wx = this.originX + cx * CELL + CELL * 0.5
         const wy = this.originY + cy * CELL + CELL * 0.5
-        if (Math.hypot(wx, wy) > worldR - CELL) {
+        const centerD = Math.hypot(wx, wy)
+        if (centerD > worldR - CELL || centerD < holeClearR) {
           solid[cy * cols + cx] = 0
           continue
         }

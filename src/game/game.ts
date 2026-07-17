@@ -40,6 +40,20 @@ import {
 export const WORLD_R = 2600
 export { RUN_SECONDS } from './acts'
 
+// ── 블랙홀 ────────────────────────────────────────────────────────────────
+/** 사건의 지평선 기본 반지름. 세계 중심의 블랙홀 — 이 게임의 무대이자 시계다. */
+export const HOLE_BASE_R = 150
+/** 막마다 지평선이 자란다 (5막 370px) — 런이 길어질수록 놀이터가 줄어든다. */
+export const HOLE_GROW = 55
+/** 시작점 — 블랙홀이 중심을 차지했으므로 플레이어는 궤도에서 출발한다. */
+export const START_DIST = 1050
+/** 지평선 위(d=holeR)에서의 중력. 이동속도(238)의 55% — 탈출은 항상 가능하다. */
+const HOLE_PULL_PLAYER = 130
+/** 적이 받는 중력. 최저 속도(88)보다 낮아 평시엔 스스로 걷는 적이 안 삼켜진다. */
+const HOLE_PULL_FOE = 58
+/** 드랍이 받는 중력(가속) — 주인 없는 XP 는 나선으로 흘러가고, 끝내 삼켜진다. */
+const HOLE_PULL_DROP = 320
+
 const MAX_FOES = 20000
 const MAX_SHOTS = 4000
 const MAX_MOTES = 24000
@@ -111,6 +125,8 @@ export class Game implements FireCtx {
   private readonly queryBuf = new Int32Array(4096)
   /** 한 스텝에 화상으로 죽는 적을 담는 버퍼 */
   private readonly deadBuf = new Int32Array(2048)
+  /** 한 스텝에 블랙홀이 삼킨 적 — deadBuf 와 달리 보상 없이 소멸한다 */
+  private readonly eatenBuf = new Int32Array(2048)
   /** 불이 옮겨붙을 후보. queryBuf 와 반드시 별개여야 한다 (ignite 주석 참고). */
   private readonly spreadBuf = new Int32Array(256)
   /**
@@ -203,6 +219,24 @@ export class Game implements FireCtx {
     return this.elapsed
   }
 
+  /** 사건의 지평선 반지름 — 막이 오를수록 블랙홀이 자란다. */
+  holeR(): number {
+    return HOLE_BASE_R + this.act * HOLE_GROW
+  }
+
+  /** 스폰·성흔이 피해야 할 반경 (지평선 + 여유) */
+  private holeGuard(): number {
+    return this.holeR() + 90
+  }
+
+  /**
+   * 이번 스텝의 중력 배율. R3(심장박동)가 마디 펄스와 포식으로 올릴 자리 —
+   * 지금은 상시 1이다. 여기 하나만 바꾸면 플레이어·적·드랍이 함께 숨쉰다.
+   */
+  private holeSurge(): number {
+    return 1
+  }
+
   start(seed: number): void {
     this.seed = seed
     this.rng = new Rng(seed)
@@ -242,7 +276,12 @@ export class Game implements FireCtx {
     this.echoGen = 0
     this.echoSlot = null
     // 지형은 시드에서 나온다. 같은 시드 = 같은 맵.
-    this.terrain.generate(seed, WORLD_R)
+    // 중심은 블랙홀 몫으로 비운다 — 5막 지평선(370) + 여유. 시작점은 궤도 위.
+    this.terrain.generate(
+      seed, WORLD_R, 0, START_DIST, HOLE_BASE_R + HOLE_GROW * (ACTS.length - 1) + 210,
+    )
+    this.player.x = 0
+    this.player.y = START_DIST
     // 시작 무기는 시드로 정한다 — 매판 다른 빌드로 출발한다.
     // 스스로 죽일 수 있는 무기만 (반향·정지로 시작하면 영원히 0킬이다)
     this.loadout.reset(STARTER_WEAPONS[this.rng.int(STARTER_WEAPONS.length)]!)
@@ -250,7 +289,7 @@ export class Game implements FireCtx {
     this.loadout.recomputeStats(this.player)
     this.player.hp = this.player.stats.maxHp
     this.camera.x = 0
-    this.camera.y = 0
+    this.camera.y = START_DIST
     this.camera.viewHeight = 820
   }
 
@@ -350,6 +389,26 @@ export class Game implements FireCtx {
       this.player.y = this.hit2[1]!
     }
 
+    // ── 블랙홀: 플레이어. **거리 제곱** 반비례 — 시작 궤도(1050)에선 사실상 0이고
+    // 지평선 2배 거리부터 몸으로 느껴지며, 지평선 안은 이동속도의 74%(상한 1.35)로
+    // 필사적이다. 지수 1로 뒀더니 무입력 방치가 27.7초 만에 지평선에 닿았다
+    // (beats 테스트가 잡았다) — 표류는 양념이지 운명이면 안 된다.
+    // 무적 주기마다 물린다. 떨어지면 죽는 게 아니라 **비싸다** — 탈출은 항상 가능하다.
+    const hr = this.holeR()
+    const surge = this.holeSurge()
+    {
+      const p = this.player
+      const pd = Math.hypot(p.x, p.y) || 1
+      const rel = hr / pd
+      const g = HOLE_PULL_PLAYER * Math.min(1.35, rel * rel) * surge * dt
+      p.x -= (p.x / pd) * g
+      p.y -= (p.y / pd) * g
+      if (pd < hr && p.hurt(16)) {
+        this.camera.shake(10, 9)
+        this.sfx('hurt')
+      }
+    }
+
     const res = updateFoes(
       {
         foes: this.foes,
@@ -363,12 +422,25 @@ export class Game implements FireCtx {
         terrain: this.terrain,
         bossIdx: this.boss.idx,
         speedMul: this.pactFoeSpeed,
+        holeR: hr,
+        holePull: HOLE_PULL_FOE * surge,
+        eatenOut: this.eatenBuf,
       },
       this.player.radius,
     )
 
     // 화상으로 쓰러진 적만 거둔다. 전체를 훑으면 후반에 매 스텝 2만 번이 그냥 낭비된다.
     for (let k = 0; k < res.deadCount; k++) this.killFoe(this.deadBuf[k]!)
+
+    // 블랙홀이 삼킨 적 — **보상 없이** 소멸한다. 적을 지평선으로 밀어 넣는 건
+    // 공짜 청소지 사냥이 아니다(XP 를 주면 최적 플레이가 "다 밀어 넣기"가 된다).
+    for (let k = 0; k < res.eatenCount; k++) {
+      const j = this.eatenBuf[k]!
+      const ex = this.foes.x[j]!
+      const ey = this.foes.y[j]!
+      spray(this.motes, ex, ey, -ex, -ey, 0.7, 2, 0.9, 0.5, 1.3, 260, 0.35, 3)
+      this.foes.kill(j)
+    }
 
     // 접촉 피해 — **한 방의 크기**다. 무적 프레임(0.4초)마다 한 번 들어간다.
     //
@@ -467,12 +539,12 @@ export class Game implements FireCtx {
         this.spawnTimer -= size - 1 // 무리 하나가 예산 size 만큼을 쓴다
         spawnCluster(
           this.foes, type, this.player.x, this.player.y,
-          620, 880, hpScale, size, 66, rand, WORLD_R,
+          620, 880, hpScale, size, 66, rand, WORLD_R, this.holeGuard(),
         )
       } else {
         const i = spawnRing(
           this.foes, type, this.player.x, this.player.y,
-          620, 900, hpScale, rand, WORLD_R,
+          620, 900, hpScale, rand, WORLD_R, this.holeGuard(),
         )
         // 엘리트 어픽스 — 2막부터 Hex·Eye 의 18%. 군중 속 "저놈부터"라는 단기 목표.
         if (
@@ -561,7 +633,7 @@ export class Game implements FireCtx {
         for (let k = 0; k < n; k++) {
           spawnRing(
             foes, Foe.Husk, bx, by, 60, 190,
-            ACTS[this.act]!.hp * 0.6, this.randFn, WORLD_R,
+            ACTS[this.act]!.hp * 0.6, this.randFn, WORLD_R, this.holeGuard(),
           )
         }
         shockwave(this.motes, bx, by, 220, 1.6, 0.6, 0.2, 0.6)
@@ -686,7 +758,7 @@ export class Game implements FireCtx {
     const hp = act.hp * 260 * (1 + this.act * 0.85)
     const i = spawnRing(
       this.foes, act.boss, this.player.x, this.player.y,
-      700, 820, hp / (FOE_STATS[act.boss]!.hp || 1), this.randFn, WORLD_R,
+      700, 820, hp / (FOE_STATS[act.boss]!.hp || 1), this.randFn, WORLD_R, this.holeGuard(),
     )
     if (i < 0) {
       // 풀이 가득 차 실패했다. bossSpawned 를 되돌려 다음 스텝에 재시도한다 —
@@ -748,7 +820,7 @@ export class Game implements FireCtx {
     const hpScale = ACTS[this.act]!.hp * (1 + actProgressAt(this.elapsed) * 0.55) * beat.hpMul
     spawnFormation(
       this.foes, beat.type, beat.form, beat.count,
-      this.player.x, this.player.y, bearing, hpScale, this.randFn, WORLD_R,
+      this.player.x, this.player.y, bearing, hpScale, this.randFn, WORLD_R, this.holeGuard(),
     )
     // 예고: 오는 방향에 파문 — "어디서"가 보여야 자리 잡기가 결정이 된다
     const hx = this.player.x + Math.cos(bearing) * 540
@@ -780,6 +852,16 @@ export class Game implements FireCtx {
       x = this.player.x - Math.cos(a) * d
       y = this.player.y - Math.sin(a) * d
     }
+    // 블랙홀 안이면 바깥으로 민다 — 성흔이 태어나자마자 삼켜지면 억울하다 (rand 무소비)
+    {
+      const cr = Math.hypot(x, y)
+      const guard = this.holeGuard() + 60
+      if (cr < guard) {
+        const s = guard / Math.max(1, cr)
+        x *= s
+        y *= s
+      }
+    }
     if (this.drops.spawn(x, y, 0, 0, 0, Drop.Vacuum) >= 0) this.vacuumOut = 1
   }
 
@@ -793,7 +875,7 @@ export class Game implements FireCtx {
       const type = (k % 5) as FoeType
       spawnRing(
         this.foes, type, this.player.x, this.player.y,
-        120, WORLD_R * 0.92, 8, this.randFn, WORLD_R,
+        120, WORLD_R * 0.92, 8, this.randFn, WORLD_R, this.holeGuard(),
       )
     }
   }
@@ -1338,11 +1420,33 @@ export class Game implements FireCtx {
     const magnet = p.stats.magnet
     const magnet2 = magnet * magnet
     const pickup2 = (p.radius + 12) * (p.radius + 12)
+    const hr = this.holeR()
+    const surge = this.holeSurge()
     let leveled = 0
 
     for (let i = 0; i < drops.high; i++) {
       if (drops.alive[i] === 0) continue
       drops.age[i]! += dt
+
+      // ── 블랙홀: 주인 없는 드랍은 나선을 그리며 중심으로 흘러가고, 끝내 삼켜진다.
+      // "줍지 않으면 블랙홀이 먹는다" — 수확 타이밍이 결정이 되는 경제 압박.
+      // 자석에 걸린 것(pulled)은 플레이어가 이기고, 성흔은 닻이라 흐르지 않는다.
+      // 막 램프: 1막은 튜토리얼이라 거의 안 흐른다(earlygame 계약 — 첫 수업 15초).
+      // 5막은 세게 흐른다 — 후반일수록 수확을 미루는 값이 비싸진다.
+      if (drops.pulled[i] === 0 && drops.type[i] !== Drop.Vacuum) {
+        const hx = drops.x[i]!
+        const hy = drops.y[i]!
+        const hd = Math.hypot(hx, hy) || 1
+        if (hd < hr * 0.94) {
+          drops.kill(i)
+          continue
+        }
+        const ramp = 0.3 + this.act * 0.175
+        const g = ((HOLE_PULL_DROP * hr * ramp) / hd) * surge * dt
+        // 접선 성분이 나선을 만든다 — 직선 낙하는 블랙홀처럼 안 보인다
+        drops.vx[i]! += (-hx / hd) * g * 0.8 + (-hy / hd) * g * 0.55
+        drops.vy[i]! += (-hy / hd) * g * 0.8 + (hx / hd) * g * 0.55
+      }
 
       const dx = p.x - drops.x[i]!
       const dy = p.y - drops.y[i]!
@@ -1494,6 +1598,9 @@ export class Game implements FireCtx {
     const act = ACTS[this.act]!
     renderer.cosmos.lerpTint(act.tintA, act.tintB, 0.02)
     renderer.cosmos.intensity = Math.min(1, this.elapsed / RUN_SECONDS + this.act * 0.05)
+    // 블랙홀은 배경 패스(cosmos)가 그린다 — 무블렌드 쓰기라 어둡게 할 수 있는
+    // 유일한 층이고, 렌즈 왜곡·원반·광자 고리까지 셰이더 한 방이다.
+    renderer.cosmos.holeR = this.holeR()
 
     renderer.begin(view, t)
 

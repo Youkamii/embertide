@@ -140,13 +140,13 @@ export const ACTS: readonly ActDef[] = [
     // (무기 1개, 화력 없음). 튜토리얼이 없는 게임이라 1막이 곧 튜토리얼이다.
     // 0.5는 과했다 — game.ts 의 warmup 과 겹쳐 초반이 텅 비고 첫 레벨업이 10초를
     // 넘겼다(결정론 테스트가 잡았다). 완만함의 주 담당은 warmup 하나로 몰았다.
-    name: '잔불', sub: '별이 하나 꺼졌다',
+    name: '잔불', sub: '죽은 별의 심장이 뛴다',
     tintA: [0.30, 0.13, 0.55], tintB: [0.05, 0.28, 0.45],
     weights: [{ type: Foe.Mote, w: 1 }],
     rate: 0.7, hp: 1, boss: Foe.Eye,
   },
   {
-    name: '조수', sub: '허공이 밀려온다',
+    name: '조수', sub: '지평선이 숨을 들이쉰다',
     tintA: [0.10, 0.30, 0.58], tintB: [0.30, 0.10, 0.50],
     weights: [
       { type: Foe.Mote, w: 0.62 }, { type: Foe.Husk, w: 0.26 }, { type: Foe.Wisp, w: 0.12 },
@@ -154,7 +154,7 @@ export const ACTS: readonly ActDef[] = [
     rate: 1.6, hp: 2.8, boss: Foe.Hex,
   },
   {
-    name: '균열', sub: '무언가 들여다본다',
+    name: '균열', sub: '원반이 타오르기 시작한다',
     tintA: [0.52, 0.10, 0.42], tintB: [0.14, 0.16, 0.60],
     weights: [
       { type: Foe.Mote, w: 0.44 }, { type: Foe.Husk, w: 0.24 },
@@ -163,7 +163,7 @@ export const ACTS: readonly ActDef[] = [
     rate: 2.6, hp: 7, boss: Foe.Eye,
   },
   {
-    name: '심연', sub: '빛이 닿지 않는 곳',
+    name: '심연', sub: '빛도 되돌아오지 못한다',
     tintA: [0.44, 0.06, 0.16], tintB: [0.26, 0.04, 0.44],
     weights: [
       { type: Foe.Mote, w: 0.34 }, { type: Foe.Husk, w: 0.24 },
@@ -174,7 +174,7 @@ export const ACTS: readonly ActDef[] = [
   {
     // 마지막 막은 잔챙이가 없다. 4막과 종족 구성이 같으면 마지막 6분이 한 장면이다
     // (테스트가 이걸 잡았다). 여기선 무거운 것들만 밀려온다 — 물량이 아니라 무게로.
-    name: '승천', sub: '꺼지거나, 타오르거나',
+    name: '승천', sub: '삼켜지거나, 타오르거나',
     tintA: [0.85, 0.42, 0.10], tintB: [0.52, 0.10, 0.46],
     weights: [
       { type: Foe.Husk, w: 0.34 }, { type: Foe.Hex, w: 0.38 },

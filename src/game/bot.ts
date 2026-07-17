@@ -22,6 +22,7 @@ export class Bot {
   /** 사람 흉내: 적 무리에서 멀어지고, 비어 있으면 XP 를 주우러 간다. */
   think(game: Game, dt: number): void {
     const p = game.player
+    const hr = game.holeR()
     this.wander += dt
 
     // 1) 주변 적에서 멀어지는 방향 — 가까울수록 세게.
@@ -48,6 +49,10 @@ export class Bot {
     let best = 260 * 260
     for (let i = 0; i < drops.high; i++) {
       if (drops.alive[i] === 0) continue
+      // 블랙홀 근처로 흘러간 XP 는 포기한다 — 사람은 검은 구멍에 손을 안 넣는다.
+      // 이 필터가 없으면 드리프트가 봇을 지평선 코앞(실측 276px)까지 유인해
+      // 지평선 테두리에 뭉친 스폰 무리와 정면 조우한다 (earlygame 광선 사망 원인).
+      if (Math.hypot(drops.x[i]!, drops.y[i]!) < hr * 2.2) continue
       const dx = drops.x[i]! - p.x
       const dy = drops.y[i]! - p.y
       const d2 = dx * dx + dy * dy
@@ -143,6 +148,14 @@ export class Bot {
       const inward = (r - WORLD_R * 0.72) / (WORLD_R * 0.28)
       mx += (-p.x / r) * inward * 2.4
       my += (-p.y / r) * inward * 2.4
+    }
+
+    // 4b) 블랙홀 — 지평선의 2.2배 안이면 바깥으로. 사람은 검은 구멍을 보고 피한다.
+    //     이 마진이 없으면 XP 를 쫓다 나선을 타고 빨려 들어간다 (중력은 상시다).
+    if (r < hr * 2.2) {
+      const out = (hr * 2.2 - r) / hr
+      mx += (p.x / Math.max(1, r)) * out * 3.0
+      my += (p.y / Math.max(1, r)) * out * 3.0
     }
 
     let len = Math.hypot(mx, my)

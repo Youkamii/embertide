@@ -29,6 +29,9 @@ uniform float u_aspect;
 uniform vec3 u_tintA;    // 성운 색 A (막마다 바뀐다)
 uniform vec3 u_tintB;    // 성운 색 B
 uniform float u_intensity; // 0..1 — 후반일수록 성운이 타오른다
+uniform float u_hole;    // 사건의 지평선 반지름 (월드 px). 0 = 블랙홀 없음
+uniform float u_beat;    // 0..1 심장박동 엔벨로프 — 광자 고리·원반이 뛴다
+uniform float u_feed;    // 0..1 포식 강도 — 원반이 타오른다
 
 float hash21(vec2 p) {
   p = fract(p * vec2(233.34, 851.73));
@@ -90,6 +93,15 @@ void main() {
 
   vec3 col = vec3(0.006, 0.008, 0.018);
 
+  // ── 블랙홀 기하. 세계 중심 (0,0)이 특이점이다.
+  float hr = u_hole;
+  float wr = length(world);
+  vec2 wdir = wr > 1.0 ? world / wr : vec2(0.0, 1.0);
+  // 중력 렌즈: 별밭 샘플 좌표를 지평선 쪽으로 당긴다 — 배경 전체가 구멍 둘레로 휜다.
+  // 슈바르츠실트의 흉내(편향 ∝ 1/충돌거리)면 충분하다. 성운은 화면 좌표라 제외.
+  float defl = hr > 1.0 ? (hr * hr * 1.6) / max(wr - hr * 0.35, hr * 0.45) : 0.0;
+  vec2 lensed = world + wdir * defl;
+
   // ── 성운: 아주 느리게 도는 fbm 두 겹.
   //
   // 좌표 스케일이 이 셰이더의 전부다. 월드 반경이 2600 이라 world*0.0009 로 잡으면
@@ -115,16 +127,42 @@ void main() {
   col += nebCol * edge * (0.09 + u_intensity * 0.2);
 
   // ── 별: 3겹 시차. 가까운 겹일수록 빠르게 흐른다(스케일이 크다 = 셀이 촘촘하다).
+  // 렌즈 좌표를 쓴다 — 블랙홀 곁을 지나면 별이 미끄러지듯 휘어 보인다.
   float stars = 0.0;
-  stars += starLayer(world * 0.022, 0.0, 0.045);   // 가깝다 — 빠르고 굵다
-  stars += starLayer(world * 0.011, 7.3, 0.03) * 0.7;
-  stars += starLayer(world * 0.006, 19.1, 0.022) * 0.45; // 멀다 — 느리고 잘다
+  stars += starLayer(lensed * 0.022, 0.0, 0.045);   // 가깝다 — 빠르고 굵다
+  stars += starLayer(lensed * 0.011, 7.3, 0.03) * 0.7;
+  stars += starLayer(lensed * 0.006, 19.1, 0.022) * 0.45; // 멀다 — 느리고 잘다
   // 별빛은 살짝 푸르게, 성운 안에서는 가려진다
   col += vec3(0.8, 0.88, 1.0) * stars * (1.0 - neb * 0.35) * 1.3;
 
   // ── 비네트 대신 아주 옅은 중심 발광 (플레이어가 있는 곳)
   float r = length(v_uv * vec2(u_aspect, 1.0));
   col += nebCol * 0.02 * pow(clamp(1.0 - r * 0.6, 0.0, 1.0), 3.0);
+
+  if (hr > 1.0) {
+    // ── 강착원반: 지평선~3배 반경의 소용돌이. 안쪽일수록 빨리 돈다(케플러).
+    float diskT = (wr - hr) / (hr * 2.1);
+    if (diskT < 1.3 && wr > hr * 0.5) {
+      float ang = atan(world.y, world.x);
+      float dT = max(diskT, 0.0);
+      float swirl = ang + u_time * 0.4 / (0.22 + dT) + dT * 6.0;
+      float bands = fbm(vec2(swirl * 1.35, dT * 9.0), 4);
+      float body = smoothstep(1.25, 0.15, diskT) * smoothstep(-0.06, 0.14, diskT);
+      // 도플러 비대칭 — 다가오는 쪽이 밝다. 이 한 줄이 "도는 원반"을 만든다.
+      float doppler = 1.0 + 0.5 * sin(ang + u_time * 0.35);
+      vec3 diskCol = mix(vec3(1.05, 0.52, 0.18), nebCol * 1.4, 0.35);
+      float glow = body * (0.22 + bands * 0.5) * doppler
+                 * (0.5 + u_intensity * 0.5 + u_feed * 1.1 + u_beat * 0.25);
+      col += diskCol * glow * 0.55;
+    }
+    // ── 광자 고리: 지평선 바로 밖 얇은 빛. 심장박동이 여기서 가장 잘 보인다.
+    float ring = exp(-abs(wr - hr * 1.045) / (hr * 0.028));
+    col += vec3(1.5, 1.15, 0.72) * ring * (0.55 + u_beat * 0.85 + u_feed * 0.7);
+    // ── 사건의 지평선: 모든 빛을 삼킨다. 배경 패스는 무블렌드 쓰기라
+    //    가법 렌더러가 못 하는 "어둡게"가 여기선 공짜다.
+    float horizon = smoothstep(hr * 1.02, hr * 0.9, wr);
+    col = mix(col, vec3(0.0), horizon);
+  }
 
   fragColor = vec4(col, 1.0);
 }`
@@ -139,6 +177,12 @@ export class Cosmos {
   tintB: [number, number, number] = [0.06, 0.34, 0.5]
   /** 0..1 — 후반일수록 성운이 타오른다 */
   intensity = 0
+  /** 사건의 지평선 반지름(월드 px). 게임이 매 프레임 넣는다. 0 = 없음 */
+  holeR = 0
+  /** 0..1 심장박동 엔벨로프 — R3(리듬)가 넣는다 */
+  beat = 0
+  /** 0..1 포식 강도 — 원반이 타오르고 고리가 조인다 */
+  feed = 0
 
   constructor(gl: GL) {
     this.gl = gl
@@ -158,6 +202,9 @@ export class Cosmos {
     gl.uniform3f(this.prog.uniforms['u_tintA']!, this.tintA[0], this.tintA[1], this.tintA[2])
     gl.uniform3f(this.prog.uniforms['u_tintB']!, this.tintB[0], this.tintB[1], this.tintB[2])
     gl.uniform1f(this.prog.uniforms['u_intensity']!, this.intensity)
+    gl.uniform1f(this.prog.uniforms['u_hole']!, this.holeR)
+    gl.uniform1f(this.prog.uniforms['u_beat']!, this.beat)
+    gl.uniform1f(this.prog.uniforms['u_feed']!, this.feed)
     gl.bindVertexArray(this.tri)
     gl.drawArrays(gl.TRIANGLES, 0, 3)
     gl.bindVertexArray(null)
