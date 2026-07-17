@@ -266,6 +266,9 @@ function boot(): void {
       game.render(renderer)
       audio.intensity = 0
       audio.updateMusic(dt)
+      // 정지 직전 프레임이 쌓아둔 효과음은 버린다 — 재개 몇 초 뒤에 낡은
+      // 피격음이 터지면 유령 피해처럼 들린다.
+      game.sfxQueue.length = 0
       if (input.consumePressed('m')) {
         audio.setMuted(!audio.muted)
         syncMute()

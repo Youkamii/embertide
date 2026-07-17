@@ -26,11 +26,11 @@ export function createContext(canvas: HTMLCanvasElement): GL {
  * float 렌더 타깃(HDR)이 가능한지. bloom 품질이 여기 달렸다.
  * 없으면 LDR(RGBA8)로 폴백하되 그림은 확연히 죽는다.
  */
-export function detectFloatTargets(gl: GL): { half: boolean; linear: boolean } {
+export function detectFloatTargets(gl: GL): { half: boolean } {
   const cbf = gl.getExtension('EXT_color_buffer_float')
   const half = !!cbf || !!gl.getExtension('EXT_color_buffer_half_float')
-  const linear = !!gl.getExtension('OES_texture_float_linear')
-  return { half, linear }
+  // linear(OES_texture_float_linear) 도 재서 반환했지만 읽는 곳이 없었다 (#9).
+  return { half }
 }
 
 function compile(gl: GL, type: number, src: string, label: string): WebGLShader {
