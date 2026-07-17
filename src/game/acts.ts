@@ -25,7 +25,7 @@ export interface ActDef {
   /** 막 끝 보스 */
   readonly boss: FoeType
   /**
-   * 심장박동 BPM — 블랙홀의 맥. 무기 발사(8분음 양자화)·중력 펄스(마디 첫 박)·
+   * 심장박동 BPM — 블랙홀의 맥. 무기 발사(16분음 양자화)·중력 펄스(마디 첫 박)·
    * 포식(8마디째)·BGM 이 전부 이 박자 하나에 물린다. 막이 오를수록 빨라진다.
    */
   readonly bpm: number

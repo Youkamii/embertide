@@ -23,8 +23,8 @@ import { Shape } from '../engine/shapes'
 import { burst, shockwave, smoke, spray, updateMotes } from './fx'
 import { drawHealthRing, drawOffscreenMarker, drawXpArc } from './hud3d'
 import {
-  AFFIX_COLORS, Affix, BOSS_SCALE, FOE_STATS, foeRotation, spawnCluster, spawnFormation,
-  spawnRing, updateFoes,
+  AFFIX_COLORS, Affix, BOSS_SCALE, FOE_STATS, foeRotation, holeClampScale, spawnCluster,
+  spawnFormation, spawnRing, updateFoes,
 } from './foes'
 import { Boss, BossState } from './boss'
 import { Loadout, type Choice } from './loadout'
@@ -41,12 +41,13 @@ export const WORLD_R = 2600
 export { RUN_SECONDS } from './acts'
 
 // ── 블랙홀 ────────────────────────────────────────────────────────────────
+// (밖에서 쓰는 건 game.holeR() 하나다 — 상수 export 는 죽은 API 가 된다)
 /** 사건의 지평선 기본 반지름. 세계 중심의 블랙홀 — 이 게임의 무대이자 시계다. */
-export const HOLE_BASE_R = 150
+const HOLE_BASE_R = 150
 /** 막마다 지평선이 자란다 (5막 370px) — 런이 길어질수록 놀이터가 줄어든다. */
-export const HOLE_GROW = 55
+const HOLE_GROW = 55
 /** 시작점 — 블랙홀이 중심을 차지했으므로 플레이어는 궤도에서 출발한다. */
-export const START_DIST = 1050
+const START_DIST = 1050
 /** 지평선 위(d=holeR)에서의 중력. 이동속도(238)의 55% — 탈출은 항상 가능하다. */
 const HOLE_PULL_PLAYER = 130
 /** 적이 받는 중력. 최저 속도(88)보다 낮아 평시엔 스스로 걷는 적이 안 삼켜진다. */
@@ -211,11 +212,11 @@ export class Game implements FireCtx {
   rerollLeft = 1
   /**
    * 심장박동 시계 — 박(beat) 단위 누적. 블랙홀의 맥이자 게임의 메트로놈:
-   * 무기 발사(8분음)·중력 펄스(마디 첫 박)·포식(8마디째)·BGM 이 전부 여기 물린다.
+   * 무기 발사(16분음)·중력 펄스(마디 첫 박)·포식(8마디째)·BGM 이 전부 여기 물린다.
    * BPM 이 막마다 올라도 **누적**이라 위상이 끊기지 않는다. rng 소비 0 — 결정론 안전.
    */
   beatClock = 0
-  /** 이번 스텝이 8분음 경계인가 — 무기 발사 창 (FireCtx, weapons.tickWeapon 이 읽는다) */
+  /** 이번 스텝이 16분음 경계인가 — 무기 발사 창 (FireCtx, weapons.tickWeapon 이 읽는다) */
   beatFire = false
   private feedingNow = false
   private feedWarned = false
@@ -246,15 +247,11 @@ export class Game implements FireCtx {
     return this.holeR() + 90
   }
 
-  /** 현재 막의 심장박동 BPM (acts 데이터) */
-  bpm(): number {
-    return ACTS[this.act]!.bpm
-  }
-
   /**
-   * 포식 — 8마디마다 한 마디(4박) 동안 블랙홀이 크게 들이쉰다. 중력이 5.2배로
-   * 치솟아 지평선 3배 반경의 적·XP 가 우수수 빨려든다. bar 16(1막 ~44초) 전엔
-   * 없다 — 첫 수업(15초 계약)과 조작 학습 구간을 침범하지 않는다.
+   * 포식 — 8마디마다 한 마디(4박) 동안 블랙홀이 크게 들이쉰다. 중력이 치솟아
+   * (holeSurge 3.8배) 지평선 근처의 적·XP 가 우수수 빨려든다.
+   * bar >= 16 게이트와 % 8 == 7 이 겹쳐 **첫 포식은 bar 23 — 88bpm 에서 62.7초**다
+   * (rhythm.test 가 시각표를 잠근다). 첫 수업(15초)과 조작 학습 구간을 침범하지 않는다.
    */
   feeding(): boolean {
     const bar = Math.floor(this.beatClock / 4)
@@ -269,7 +266,7 @@ export class Game implements FireCtx {
 
   /**
    * 이번 스텝의 중력 배율 — 심장박동이 곧 중력이다.
-   * 마디 첫 박(0.5박)마다 "쿵" 하고 조이고(2.6배), 포식 마디는 5.2배.
+   * 마디 첫 박(0.5박)마다 "쿵" 하고 조이고(2.6배), 포식 마디는 3.8배.
    * 여기 하나로 플레이어·적·드랍이 함께 숨쉰다.
    */
   private holeSurge(): number {
@@ -475,7 +472,13 @@ export class Game implements FireCtx {
       const p = this.player
       const pd = Math.hypot(p.x, p.y) || 1
       const rel = hr / pd
-      const g = HOLE_PULL_PLAYER * Math.min(1.35, rel * rel) * surge * dt
+      // 절대 상한: 이동속도의 82%. 포식 서지(3.8배)가 곱해지면 흡입이 667px/s 까지
+      // 치솟아 지평선 1.44배 안이 **탈출 불가**였다(적대 리뷰가 수학으로 증명) —
+      // "떨어지면 비싸다, 그러나 탈출은 항상 가능하다"는 이 게임의 계약이다.
+      const g = Math.min(
+        HOLE_PULL_PLAYER * Math.min(1.35, rel * rel) * surge,
+        p.stats.speed * 0.82,
+      ) * dt
       p.x -= (p.x / pd) * g
       p.y -= (p.y / pd) * g
       if (pd < hr && p.hurt(16)) {
@@ -939,12 +942,14 @@ export class Game implements FireCtx {
     }
     // 블랙홀 안이면 바깥으로 민다 — 성흔이 태어나자마자 삼켜지면 억울하다 (rand 무소비)
     {
-      const cr = Math.hypot(x, y)
-      const guard = this.holeGuard() + 60
-      if (cr < guard) {
-        const s = guard / Math.max(1, cr)
-        x *= s
-        y *= s
+      const s = holeClampScale(x, y, this.holeGuard() + 60)
+      x *= s
+      y *= s
+      // 원점 1px 이내 롤은 배율로 못 살린다(0×s=0) — 성흔은 판당 한둘뿐인 소실
+      // 불가 자산이라 결정적 위치로 강제한다 (확률 ~1e-9 지만 대가가 크다)
+      if (Math.hypot(x, y) < this.holeR()) {
+        x = 0
+        y = this.holeGuard() + 60
       }
     }
     if (this.drops.spawn(x, y, 0, 0, 0, Drop.Vacuum) >= 0) this.vacuumOut = 1

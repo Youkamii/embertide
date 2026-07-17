@@ -261,15 +261,27 @@ export class Audio {
   private lastIdx16 = -1
 
   /**
+   * 심장박동 동기 리셋 — 게임을 재시작하면 beatClock 은 0으로 돌아가는데
+   * 이 인덱스가 이전 런 최대치에 머물면 `idx <= lastIdx16` 이 영원히 참이라
+   * **두 번째 런부터 BGM 이 통째로 무음**이 된다 (적대 리뷰가 잡았다).
+   * game.start() 를 부르는 쪽이 반드시 함께 부른다.
+   */
+  resetMusicSync(): void {
+    this.lastIdx16 = -1
+  }
+
+  /**
    * 적응형 BGM. 압박이 커질수록 레이어가 쌓인다.
    *
    * **심장박동 동기**: beatClock(박 단위, 게임의 단일 박자원)을 받으면 16분 그리드를
    * 거기서 유도한다 — 킥이 곧 게임의 박이고, 마디 첫 박(s%16==0)은 강킥이다.
-   * 무기 발사(8분음 양자화)·중력 펄스가 같은 시계에 물려 있으므로, 여기가 어긋나면
+   * 무기 발사(16분음 양자화)·중력 펄스가 같은 시계에 물려 있으므로, 여기가 어긋나면
    * 리듬게임이 아니라 소음이 된다. 시뮬이 멈추면(일시정지·레벨업) 음악도 멈춘다.
-   * beatClock 없이 부르면(타이틀·정지 화면) 자체 타이머로 돈다.
+   * 프레임 히컵으로 그리드가 여럿 지나갔으면 **최신 것만** 연주한다 — 밀린 스텝을
+   * 같은 시각에 몰아 예약하면 단발 폭음이 된다 (적대 리뷰가 잡았다).
+   * beatClock 없이 부르면(일시정지 화면) 자체 타이머로 돈다.
    */
-  updateMusic(dt: number, beatClock = -1, bpm = 116): void {
+  updateMusic(dt: number, beatClock = -1): void {
     const ctx = this.ctx
     const bus = this.musicGain
     if (!ctx || !bus || this.muted) return
@@ -277,13 +289,8 @@ export class Audio {
     if (beatClock >= 0) {
       const idx = Math.floor(beatClock * 4)
       if (idx <= this.lastIdx16) return
-      // 탭 복귀 등으로 크게 밀렸으면 따라잡지 않는다 — 몰아 연주하면 소음이다
-      if (idx - this.lastIdx16 > 8) this.lastIdx16 = idx - 1
-      const t = ctx.currentTime + 0.02
-      while (this.lastIdx16 < idx) {
-        this.lastIdx16++
-        this.scheduleStep(this.lastIdx16, t, bpm)
-      }
+      this.lastIdx16 = idx
+      this.scheduleStep(idx, ctx.currentTime + 0.02)
       return
     }
 
@@ -292,11 +299,11 @@ export class Audio {
     this.musicTimer -= dt
     if (this.musicTimer > 0) return
     this.musicTimer += stepDur
-    this.scheduleStep(this.musicStep++, ctx.currentTime + 0.02, selfBpm)
+    this.scheduleStep(this.musicStep++, ctx.currentTime + 0.02)
   }
 
   /** 시퀀서 16분 스텝 하나 예약. s 가 그리드 위치(마디 = 16)를 정한다. */
-  private scheduleStep(s: number, t: number, _bpm: number): void {
+  private scheduleStep(s: number, t: number): void {
     const bus = this.musicGain!
     const inten = this.intensity
 

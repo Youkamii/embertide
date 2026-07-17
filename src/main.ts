@@ -321,6 +321,9 @@ function boot(): void {
         result = null
         isBest = false
         game.start(seed)
+        // beatClock 이 0으로 돌아가므로 오디오 시퀀서 인덱스도 함께 되감는다 —
+        // 안 되감으면 두 번째 런부터 BGM 이 통째로 무음이다 (적대 리뷰가 잡았다)
+        audio.resetMusicSync()
         if (bench > 0) game.benchSpawn(bench)
       }
     }
@@ -342,7 +345,7 @@ function boot(): void {
     // 음악 압박도 = 런 진행도. 마지막 1분이 다른 곡처럼 들려야 한다.
     audio.intensity = game.phase === Phase.Playing ? Math.min(1, game.elapsed / RUN_SECONDS) : 0
     // 심장박동 동기 — BGM 킥이 곧 게임의 박자다 (무기 발사·중력 펄스와 같은 시계)
-    audio.updateMusic(dt, game.beatClock, game.bpm())
+    audio.updateMusic(dt, game.beatClock)
 
     const p = game.player
     const hpPct = Math.round((p.hp / p.stats.maxHp) * 100)

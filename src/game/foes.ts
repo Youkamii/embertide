@@ -414,13 +414,24 @@ let ringX = 0
 let ringY = 0
 
 /**
+ * 블랙홀 안에 놓일 좌표를 지평선 밖으로 미는 배율 (1 = 그대로).
+ * 스폰 세 경로(링·진형·성흔)가 **같은 클램프**를 쓴다 — 인라인 복붙 3벌이 벌써
+ * 서로 어긋나기 시작했었다(#9 가 고친 병이 같은 자리에서 재발, 적대 리뷰가 잡았다).
+ * rand 를 소비하지 않는다 — 난수 스트림 불변이 계약이다.
+ */
+export function holeClampScale(x: number, y: number, guard: number): number {
+  if (guard <= 0) return 1
+  const r = Math.hypot(x, y)
+  return r < guard ? guard / Math.max(1, r) : 1
+}
+
+/**
  * 링 밖 랜덤 위치 하나를 ringX/ringY 에 담는다.
  * 월드 밖이면 반대편으로 접는다 — 안 그러면 경계 근처에서 스폰이 한쪽으로 쏠린다.
  * (spawnRing/spawnCluster 에 7줄이 verbatim 복붙돼 있었고, 접는 이유 주석이 한쪽에만
  * 남아 이미 열화가 시작돼 있었다 — #9)
  *
- * holeGuard: 이 반경 안(블랙홀)엔 놓지 않는다 — 태어나자마자 삼켜지는 스폰은 낭비고,
- * rand 를 더 소비하지 않고 좌표만 밀어야 난수 스트림이 한 비트도 안 변한다.
+ * holeGuard: 이 반경 안(블랙홀)엔 놓지 않는다 — 태어나자마자 삼켜지는 스폰은 낭비다.
  */
 function rollRingPos(
   cx: number, cy: number, ringMin: number, ringMax: number,
@@ -433,14 +444,13 @@ function rollRingPos(
   if (Math.hypot(x, y) > worldR * 0.97) {
     x = cx - Math.cos(a) * d
     y = cy - Math.sin(a) * d
-  }
-  if (holeGuard > 0) {
-    const cr = Math.hypot(x, y)
-    if (cr < holeGuard) {
-      const s = holeGuard / Math.max(1, cr)
-      x *= s
-      y *= s
-    }
+  } else if (holeGuard > 0 && Math.hypot(x, y) < holeGuard) {
+    // 블랙홀 안이면 **반대편으로 접는다** — 경계와 같은 규칙.
+    // 지평선 원 위로 투영했더니 플레이어 쪽 호에 뭉쳐 "620~900px 밖" 계약을 깨고
+    // 240px 코앞 스폰 + 링 밀집을 만들었다(적대 리뷰가 기하로 증명). 접으면
+    // 플레이어와의 거리(d)가 보존되고, 반대편은 항상 지평선에서 더 멀다.
+    x = cx - Math.cos(a) * d
+    y = cy - Math.sin(a) * d
   }
   ringX = x
   ringY = y
@@ -540,15 +550,15 @@ export function spawnFormation(
       x = px + dirX * (620 + rand() * 160) + perpX * (rand() - 0.5) * 280
       y = py + dirY * (620 + rand() * 160) + perpY * (rand() - 0.5) * 280
     }
-    // 월드 밖이면 안쪽으로 눌러 담는다 — 접으면(반대편) 진형이 깨진다
+    // 월드 밖이면 안쪽으로 눌러 담는다 — 접으면(반대편) 진형이 깨진다.
+    // 블랙홀 안이면 바깥으로 — 진형 일부가 잘려도 삼켜지는 것보단 낫다.
     const rr = Math.hypot(x, y)
     if (rr > worldR * 0.95) {
       const s = (worldR * 0.95) / rr
       x *= s
       y *= s
-    } else if (holeGuard > 0 && rr < holeGuard) {
-      // 블랙홀 안이면 바깥으로 — 진형 일부가 잘려도 삼켜지는 것보단 낫다
-      const s = holeGuard / Math.max(1, rr)
+    } else {
+      const s = holeClampScale(x, y, holeGuard)
       x *= s
       y *= s
     }

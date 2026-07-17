@@ -84,6 +84,37 @@ describe('블랙홀', () => {
     expect(g.player.hp, '공짜도 아니다 — 물렸다').toBeLessThan(hp0)
   })
 
+  it('포식 중에도 탈출할 수 있다 — "항상 탈출 가능"의 가장 어려운 경우', () => {
+    const g = new Game()
+    g.start(15)
+    const idle = mockInput(0, 0)
+    // 첫 포식(88bpm bar 23 = 62.7초)까지 관찰자 모드로 보낸다
+    let guard = 0
+    while (!g.feeding() && guard++ < 70 * 60 + 3000) {
+      if (g.phase === Phase.LevelUp) {
+        g.choose(g.pendingChoices[0]!)
+        continue
+      }
+      if (g.phase !== Phase.Playing) break
+      g.player.hp = g.player.stats.maxHp
+      g.update(idle, 1 / 60)
+    }
+    expect(g.feeding(), '포식에 도달했다').toBe(true)
+    // 지평선 1.3배 — 흡입 상한(이동속도 82%)이 없던 시절 탈출 불가였던 구간(1.44배
+    // 이내) 한복판. 여기서 전력 질주로 벗어날 수 있어야 계약이 "항상"이다.
+    const hr = g.holeR()
+    g.player.x = 0
+    g.player.y = hr * 1.3
+    const out = mockInput(0, 1)
+    let steps = 0
+    while (Math.hypot(g.player.x, g.player.y) < hr * 1.8 && steps < 60 * 5) {
+      g.player.hp = g.player.stats.maxHp // 재는 건 생존이 아니라 탈출 가능성이다
+      g.update(out, 1 / 60)
+      steps++
+    }
+    expect(steps, '포식 중에도 5초 안에 벗어난다').toBeLessThan(60 * 5)
+  })
+
   it('스폰은 지평선 안에 놓이지 않는다', () => {
     const g = new Game()
     g.start(14)

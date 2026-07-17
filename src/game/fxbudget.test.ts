@@ -140,10 +140,6 @@ describe('이펙트 광량 예산', () => {
 
     const lums: number[] = []
     const calms: number[] = []
-    let worstQuads: Quad[] = []
-    let worstLum = -1
-    let worstPx = 0
-    let worstPy = 0
     refill(g, spawnRng, 2600)
 
     const steps = 12 * 60
@@ -158,35 +154,9 @@ describe('이펙트 광량 예산', () => {
       if (s % 60 === 0) refill(g, spawnRng, 2600)
       if (s % 2 === 0) {
         g.render(renderer as unknown as Renderer)
-        const lum = centerLum(renderer.batch.quads, g.player.x, g.player.y)
-        lums.push(lum)
+        lums.push(centerLum(renderer.batch.quads, g.player.x, g.player.y))
         calms.push(renderer.calm)
-        if (lum > worstLum) {
-          worstLum = lum
-          worstQuads = renderer.batch.quads.slice()
-          worstPx = g.player.x
-          worstPy = g.player.y
-        }
       }
-    }
-
-    // 진단: 최악 프레임의 모양별 기여도 (주범 색출용 — 상한 확정 후 제거해도 된다)
-    {
-      const byShape = new Map<number, number>()
-      const R = 240
-      for (const q of worstQuads) {
-        const qr = q.size * 0.75
-        const d = Math.hypot(q.x - worstPx, q.y - worstPy)
-        if (d >= qr + R) continue
-        const rmin = Math.min(qr, R)
-        const overlap = Math.min(1, (qr + R - d) / (2 * rmin))
-        const contrib =
-          (Math.max(q.r, q.g, q.b) * q.a * (SPARSE.has(q.shape) ? 0.3 : 1) *
-            Math.PI * rmin * rmin * overlap) / (Math.PI * R * R)
-        byShape.set(q.shape, (byShape.get(q.shape) ?? 0) + contrib)
-      }
-      const top = [...byShape.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
-      console.log('[fxbudget] 최악 프레임 모양별 기여:', top.map(([s, v]) => `${s}:${v.toFixed(2)}`).join(' '))
     }
 
     lums.sort((a, b) => a - b)

@@ -319,7 +319,7 @@ export function tickWeapon(slot: WeaponSlot, ctx: FireCtx, dt: number): void {
     }
   }
   // 상한(4)에 잘린 적자는 탕감한다 — 안 그러면 극단 공속에서 timer 가 음수로
-  // 발산하며 영원히 4연발 상태에 갇힌다. 8분음당 4볼리가 곧 발사율 상한이다.
+  // 발산하며 영원히 4연발 상태에 갇힌다. 16분음 창당 4볼리가 곧 발사율 상한이다.
   if (slot.timer < 0) slot.timer = 0
 }
 
