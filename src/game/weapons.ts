@@ -30,8 +30,11 @@ export interface FireCtx {
   damageFoe(j: number, damage: number, fromVx: number, fromVy: number): void
   shake(amount: number, decay?: number): void
   sfx(name: SfxName): void
-  /** 월드에 지속 효과체(중력정·신문·정지장)를 놓는다 */
-  placeField(kind: number, x: number, y: number, radius: number, power: number, life: number): void
+  /** 월드에 지속 효과체(중력정·신문·정지장)를 놓는다. evolved 는 호출자가 안다. */
+  placeField(
+    kind: number, x: number, y: number, radius: number, power: number, life: number,
+    evolved: boolean, gen?: number,
+  ): void
   /** 반경 안 적을 전부 밀거나 당긴다. force 가 음수면 당긴다. */
   pushFoes(x: number, y: number, radius: number, force: number): void
   /** 지형을 부순다 (혜성 전용) */
@@ -313,7 +316,7 @@ function fireWell(slot: WeaponSlot, ctx: FireCtx): void {
   const radius = (110 + slot.level * 12) * s.area * s.blast
   const power = (14 + slot.level * 7) * s.damage
   // 진화(특이점)는 오래 남고 끝에 붕괴한다
-  ctx.placeField(Field.Well, x, y, radius, power, slot.evolved ? 4.2 : 2.6)
+  ctx.placeField(Field.Well, x, y, radius, power, slot.evolved ? 4.2 : 2.6, slot.evolved)
   ctx.sfx('nova')
 }
 
@@ -435,7 +438,7 @@ function fireSigil(slot: WeaponSlot, ctx: FireCtx): void {
   // 반경이 크면 플레이어 주변이 흰 링으로 덮여 정작 피해야 할 적이 안 보인다(실측).
   const radius = (34 + slot.level * 3.4) * s.area * s.blast
   const power = (18 + slot.level * 9) * s.damage
-  ctx.placeField(Field.Sigil, p.x, p.y, radius, power, slot.evolved ? 7 : 4.5)
+  ctx.placeField(Field.Sigil, p.x, p.y, radius, power, slot.evolved ? 7 : 4.5, slot.evolved)
   ctx.sfx('pickup')
 }
 
@@ -447,7 +450,7 @@ function fireStill(slot: WeaponSlot, ctx: FireCtx): void {
   const radius = (150 + slot.level * 16) * s.area
   // 진화(영겁)는 멈춘 것을 더 아프게 만든다 — power 가 피해 증폭 배율로 쓰인다
   const power = slot.evolved ? 1.9 : 1
-  ctx.placeField(Field.Still, p.x, p.y, radius, power, 3.2)
+  ctx.placeField(Field.Still, p.x, p.y, radius, power, 3.2, slot.evolved)
   ctx.sfx('nova')
   ctx.shake(3, 12)
 }
@@ -734,16 +737,24 @@ export function isEvolvedShot(weapon: number): boolean {
  * 반향 — 무언가 죽은 자리에서 소리가 되돌아온다.
  * game.ts 의 killFoe 가 부른다. 확률로 발동해야 화면이 연쇄로 뒤덮이지 않는다.
  */
-export function echoKill(slot: WeaponSlot, ctx: FireCtx, x: number, y: number, depth: number): void {
+export function echoKill(slot: WeaponSlot, ctx: FireCtx, x: number, y: number, gen: number): void {
   const s = ctx.player.stats
-  // 진화(연쇄붕괴)는 반향이 또 반향을 낳는다. depth 로 상한을 둔다 —
-  // 없으면 후반 초당 수백 킬에서 무한 연쇄가 되어 프레임이 죽는다.
-  const maxDepth = slot.evolved ? 2 + Math.floor(s.chain) : 0
-  if (depth > maxDepth) return
-  const chance = (0.16 + slot.level * 0.035) * (depth === 0 ? 1 : 0.45)
+  /**
+   * 세대 상한. **호출 깊이가 아니다.**
+   *
+   * 예전엔 explode() 안에서만 오르내리는 depth 를 썼는데, 반향 폭발은 필드 만료 후
+   * 다음 프레임에 새 스택으로 일어나므로 depth 가 항상 0~1 이었다. 결과:
+   *  - 미진화(maxDepth 0): depth 1 > 0 → 혜성·신문·특이점으로 죽인 적에서 **절대 안 터짐**
+   *  - 진화(maxDepth 2+): 상한이 **한 번도 발동 안 함** → chance 만이 유일한 제동
+   * 둘 다 의도와 반대였다(적대 리뷰가 잡았다). 세대는 필드에 실려야 스택을 넘는다.
+   */
+  const maxGen = slot.evolved ? 1 + Math.floor(s.chain) : 0
+  if (gen > maxGen) return
+  // 세대가 깊을수록 확률이 준다 — 이게 분기 계수를 1 아래로 눌러 연쇄를 수렴시킨다
+  const chance = (0.16 + slot.level * 0.035) * Math.pow(0.42, gen)
   if (ctx.rng.next() > chance) return
 
   const radius = (58 + slot.level * 7) * s.area * s.blast
   const power = (14 + slot.level * 8) * s.damage
-  ctx.placeField(Field.Echo, x, y, radius, power, 0.42)
+  ctx.placeField(Field.Echo, x, y, radius, power, 0.42, slot.evolved, gen)
 }

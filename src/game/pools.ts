@@ -90,6 +90,13 @@ export class Foes extends PoolBase {
   /** 피해 증폭 배율 (1 = 정상). 영겁(정지 진화)이 건다. */
   readonly frail: Float32Array
   readonly seed: Float32Array
+  /**
+   * 개체 고유 번호. **인덱스는 신원이 아니다** — acquire() 가 LIFO 라 죽은 슬롯을
+   * 즉시 재사용하므로, 인덱스를 붙잡아 둔 쪽(보스 등)이 다음 스텝에 엉뚱한 개체를
+   * 가리킬 수 있다. 실제로 잡졸이 보스 정체성을 상속하는 버그가 있었다.
+   */
+  readonly stamp: Int32Array
+  private stampCounter = 1
 
   constructor(capacity: number) {
     super(capacity)
@@ -108,6 +115,12 @@ export class Foes extends PoolBase {
     this.slow = new Float32Array(capacity)
     this.frail = new Float32Array(capacity)
     this.seed = new Float32Array(capacity)
+    this.stamp = new Int32Array(capacity)
+  }
+
+  /** 다음 개체에 붙을 도장. spawn 이 쓰기 전에 미리 알아야 하는 쪽(보스)이 읽는다. */
+  peekStamp(): number {
+    return this.stampCounter
   }
 
   spawn(x: number, y: number, type: FoeType, hp: number, seed: number): number {
@@ -128,6 +141,7 @@ export class Foes extends PoolBase {
     this.slow[i] = 1
     this.frail[i] = 1
     this.seed[i] = seed
+    this.stamp[i] = this.stampCounter++
     return i
   }
 }
@@ -273,6 +287,15 @@ export class Fields extends PoolBase {
   readonly seed: Float32Array
   /** 진화형인지 (거동이 갈린다) */
   readonly evolved: Uint8Array
+  /**
+   * 연쇄 세대. 반향이 반향을 낳을 때 1씩 오른다.
+   *
+   * **스택 깊이로는 못 센다.** 반향의 폭발은 필드가 만료된 뒤 다음 프레임에 새 스택으로
+   * 일어나므로 호출 깊이는 항상 0~1 이었고, 그래서 상한(2+chain)이 **발동한 적이 없다**
+   * (적대 리뷰가 잡았다 — 안전장치가 있다고 믿고 있었는데 없었다).
+   * 세대는 필드에 실려야 스택을 넘어 살아남는다.
+   */
+  readonly gen: Uint8Array
 
   constructor(capacity: number) {
     super(capacity)
@@ -286,12 +309,13 @@ export class Fields extends PoolBase {
     this.charge = new Float32Array(capacity)
     this.seed = new Float32Array(capacity)
     this.evolved = new Uint8Array(capacity)
+    this.gen = new Uint8Array(capacity)
   }
 
   spawn(
     kind: number, x: number, y: number,
     radius: number, power: number, life: number,
-    evolved: boolean, seed: number,
+    evolved: boolean, seed: number, gen = 0,
   ): number {
     const i = this.acquire()
     if (i < 0) return -1
@@ -305,6 +329,7 @@ export class Fields extends PoolBase {
     this.charge[i] = 0
     this.seed[i] = seed
     this.evolved[i] = evolved ? 1 : 0
+    this.gen[i] = gen
     return i
   }
 }

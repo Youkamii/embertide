@@ -96,24 +96,37 @@ export interface FoeUpdateCtx {
   readonly deadOut: Int32Array
   /** 지형. 적은 길을 찾지 않고 갉아먹는다. */
   readonly terrain: Terrain | null
+  /** 보스 슬롯 (-1 = 없음). 판정 반경이 렌더와 같아야 하므로 여기서도 알아야 한다. */
+  readonly bossIdx: number
 }
 
 export interface FoeUpdateResult {
-  /** 플레이어에게 닿은 적들의 접촉 피해 총합 (호출자가 무적 프레임을 따져 적용한다) */
+  /**
+   * 지금 몸에 닿아 있는 적 중 **가장 아픈 놈의 피해**. dt 로 나누지 않는다.
+   *
+   * 예전엔 `contactDamage += stat.damage * dt` 로 **한 스텝치(1/60초)** 를 누적한 뒤
+   * 0.55초 무적을 걸었다. 실효 DPS 가 Mote 0.40, Eye 1.73 —
+   * **이 게임은 플레이어를 죽일 수 없었다.** 봇이 5/6 완주한 건 봇이 잘해서가 아니라
+   * 게임이 피해를 안 줘서였고, 밸런스 측정 4회가 전부 무의미했다(적대 리뷰가 잡았다).
+   *
+   * 무적 프레임이 있는 게임에서 접촉 피해는 **한 방의 크기**여야 한다 — 시간당이 아니라.
+   */
   contactDamage: number
+  /** 몸에 닿아 있는 적 수. 포위당하면 더 아프게 만드는 데 쓴다. */
+  contactCount: number
   /** deadOut 에 담긴 유효 개수 */
   deadCount: number
 }
 
 /** 프레임당 1회만 만들어지므로 객체 반환이 GC 를 건드리지 않는다. */
-const result: FoeUpdateResult = { contactDamage: 0, deadCount: 0 }
+const result: FoeUpdateResult = { contactDamage: 0, contactCount: 0, deadCount: 0 }
 
 /** resolveCircle 결과를 받는 스크래치. 프레임당 수만 번 불리므로 재사용한다. */
 const scratch = new Float32Array(2)
 
 /** 군체 한 틱. */
 export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateResult {
-  const { foes, hash, playerX, playerY, dt, time, worldR, deadOut, terrain } = ctx
+  const { foes, hash, playerX, playerY, dt, time, worldR, deadOut, terrain, bossIdx } = ctx
   let deadCount = 0
   const high = foes.high
   const alive = foes.alive
@@ -126,6 +139,7 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
   hash.build(xs, ys, alive, high)
 
   let contactDamage = 0
+  let contactCount = 0
   const worldR2 = worldR * worldR
 
   for (let i = 0; i < high; i++) {
@@ -281,9 +295,14 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
     ys[i] = ny
 
     // ── 플레이어 접촉
-    const touch = stat.radius + playerRadius
+    // 보스는 렌더가 3.4배라 판정도 3.4배여야 한다
+    const bodyR = i === bossIdx ? stat.radius * BOSS_SCALE : stat.radius
+    const touch = bodyR + playerRadius
     if (distSq < touch * touch) {
-      contactDamage += stat.damage * dt
+      // 합산이 아니라 **최댓값**이다. 합치면 잔챙이 20마리가 Eye 보다 아프고,
+      // dt 를 곱하면 아무도 안 아프다. 포위 보정은 호출자가 개수로 얹는다.
+      if (stat.damage > contactDamage) contactDamage = stat.damage
+      contactCount++
     }
 
     // ── 상태 타이머
@@ -295,6 +314,7 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
   }
 
   result.contactDamage = contactDamage
+  result.contactCount = contactCount
   result.deadCount = deadCount
   return result
 }
@@ -362,6 +382,15 @@ export function spawnRing(
   const stat = FOE_STATS[type]!
   return foes.spawn(x, y, type, stat.hp * hpScale, rand())
 }
+
+/**
+ * 보스 크기 배율. **렌더와 판정이 같은 값을 써야 한다.**
+ *
+ * 렌더만 3.4배로 키우고 판정은 원본을 썼더니 보이는 몸통의 71%가 관통 불가 허상이었다 —
+ * 5막 Eye 보스는 반경 92px 로 보이는데 40px 안에 들어가야 맞았고, 돌진이 몸을 지나가도
+ * 안 아팠다. 예고·회피·빈틈 3단 설계가 전부 연극이었다(적대 리뷰가 잡았다).
+ */
+export const BOSS_SCALE = 3.4
 
 /** 표시용 회전각. Husk 만 진행 방향을 본다 (삼각형이라 방향이 읽힌다). */
 export function foeRotation(foes: Foes, i: number, time: number): number {

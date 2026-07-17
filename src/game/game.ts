@@ -21,14 +21,16 @@ import {
 import { Shape } from '../engine/shapes'
 import { burst, shockwave, smoke, spray, updateMotes } from './fx'
 import { drawHealthRing, drawOffscreenMarker, drawXpArc } from './hud3d'
-import { FOE_STATS, foeRotation, spawnCluster, spawnRing, updateFoes } from './foes'
+import { BOSS_SCALE, FOE_STATS, foeRotation, spawnCluster, spawnRing, updateFoes } from './foes'
 import { Boss, BossState } from './boss'
 import { Loadout, type Choice } from './loadout'
+import { xpForLevel } from './player'
 import { Player } from './player'
 import { CELL, Terrain } from './terrain'
 import { Drop, Drops, Fields, Foe, Foes, Motes, Shots, type FoeType } from './pools'
 import {
-  echoKill, Field, isEvolvedShot, STARTER_WEAPONS, tickWeapon, W, WEAPONS, type FireCtx,
+  echoKill, Field, isEvolvedShot, STARTER_WEAPONS, tickWeapon, W, WEAPONS,
+  type FireCtx, type WeaponSlot,
 } from './weapons'
 
 export const WORLD_R = 2600
@@ -38,6 +40,8 @@ const MAX_FOES = 20000
 const MAX_SHOTS = 4000
 const MAX_MOTES = 24000
 const MAX_DROPS = 3000
+/** 주워지지 않은 XP 가 사라지기까지. 풀 포화를 막는 유일한 장치다. */
+const DROP_LIFE = 26
 const MAX_FIELDS = 512
 
 /** 시뮬레이션 고정 스텝 (초). 1/60. */
@@ -59,9 +63,6 @@ export const Phase = {
   Won: 3,
 } as const
 export type PhaseType = (typeof Phase)[keyof typeof Phase]
-
-/** Field 종류 → 그걸 만든 무기. 진화 여부를 되찾을 때 쓴다. */
-const FIELD_OWNER: readonly number[] = [W.Well, W.Sigil, W.Still, W.Echo]
 
 export class Game implements FireCtx {
   readonly player = new Player()
@@ -120,10 +121,15 @@ export class Game implements FireCtx {
   /** 지형 충돌 결과를 받는 스크래치 */
   private readonly hit2 = new Float32Array(2)
   /**
-   * 반향 연쇄 깊이. 반향이 죽인 적이 또 반향을 낳으므로 상한이 없으면
-   * 후반 초당 수백 킬에서 무한 연쇄가 되어 프레임이 죽는다.
+   * 지금 처리 중인 폭발의 세대. 반향 필드가 터질 때 그 필드의 gen 을 여기 실어,
+   * 그 폭발로 죽은 적이 낳는 새 반향이 gen+1 을 물려받게 한다.
+   *
+   * **호출 스택으로는 못 센다.** 반향 폭발은 필드 만료 후 다음 프레임에 새 스택으로
+   * 일어나므로 깊이는 항상 0~1 이었고, 그래서 상한이 발동한 적이 없었다.
    */
-  private echoDepth = 0
+  private echoGen = 0
+  /** 반향 슬롯 캐시. 매 킬마다 find() 로 찾으면 hot path 에서 낭비다. */
+  private echoSlot: WeaponSlot | null = null
   /** 현재 막 (0-based) */
   act = 0
   /** 막 전환 연출 남은 시간 */
@@ -180,12 +186,14 @@ export class Game implements FireCtx {
     this.actIntro = ACT_INTRO_SECONDS
     this.bossSpawned = false
     this.boss.reset()
-    this.echoDepth = 0
+    this.echoGen = 0
+    this.echoSlot = null
     // 지형은 시드에서 나온다. 같은 시드 = 같은 맵.
     this.terrain.generate(seed, WORLD_R, 1)
     // 시작 무기는 시드로 정한다 — 매판 다른 빌드로 출발한다.
     // 스스로 죽일 수 있는 무기만 (반향·정지로 시작하면 영원히 0킬이다)
     this.loadout.reset(STARTER_WEAPONS[this.rng.int(STARTER_WEAPONS.length)]!)
+    this.echoSlot = this.loadout.findWeapon(W.Echo) ?? null
     this.loadout.recomputeStats(this.player)
     this.player.hp = this.player.stats.maxHp
     this.camera.x = 0
@@ -196,6 +204,7 @@ export class Game implements FireCtx {
   /** 레벨업 선택 확정. UI 가 부른다. */
   choose(choice: Choice): void {
     this.loadout.apply(choice, this.player)
+    this.echoSlot = this.loadout.findWeapon(W.Echo) ?? null
     if (choice.kind === 'evolve') {
       // 진화는 이 게임에서 가장 귀한 순간이라 유일하게 EVENT 밝기를 쓴다. 1초 미만.
       this.sfx('evolve')
@@ -287,6 +296,7 @@ export class Game implements FireCtx {
         worldR: WORLD_R,
         deadOut: this.deadBuf,
         terrain: this.terrain,
+        bossIdx: this.boss.idx,
       },
       this.player.radius,
     )
@@ -294,9 +304,19 @@ export class Game implements FireCtx {
     // 화상으로 쓰러진 적만 거둔다. 전체를 훑으면 후반에 매 스텝 2만 번이 그냥 낭비된다.
     for (let k = 0; k < res.deadCount; k++) this.killFoe(this.deadBuf[k]!)
 
-    if (res.contactDamage > 0 && this.player.hurt(res.contactDamage * 2.2)) {
-      this.camera.shake(9, 12)
-      this.sfx('hurt')
+    // 접촉 피해 — **한 방의 크기**다. 무적 프레임(0.4초)마다 한 번 들어간다.
+    //
+    // 포위당하면 더 아프다: 닿은 수가 8이면 2배. 합산하지 않는 이유는 잔챙이 20마리가
+    // Eye 보다 아파지면 종족 설계가 무너지기 때문이다.
+    //   Mote 1마리: 6 / 0.4s = 15 DPS
+    //   Mote 8+:    12 / 0.4s = 30 DPS
+    //   Eye 8+:     52 / 0.4s = 130 DPS  → Lv57 체력 570 이면 4.4초
+    if (res.contactDamage > 0) {
+      const crowd = 1 + Math.min(res.contactCount, 8) / 8
+      if (this.player.hurt(res.contactDamage * crowd)) {
+        this.camera.shake(9, 12)
+        this.sfx('hurt')
+      }
     }
     if (!this.player.alive) {
       this.onDeath()
@@ -330,7 +350,12 @@ export class Game implements FireCtx {
     const overall = this.elapsed / RUN_SECONDS
 
     // 초당 스폰 예산. 막 배율 × (막 안 진행에 따른 조임) × (런 전체 가속)
-    const rate = (18 + inAct * 46) * act.rate * (1 + overall * 1.4)
+    //
+    // 첫 25초는 더 완만하다. 조작을 배우기도 전에 포위당하면 아무도 두 번 안 한다 —
+    // 접촉 피해를 진짜로 고치자 봇이 12~23초에 죽었고, 그건 난이도가 아니라 시작
+    // 자체를 막는 것이다. 튜토리얼이 없는 게임이라 첫 25초가 곧 튜토리얼이다.
+    const warmup = Math.min(1, 0.25 + (this.elapsed / 25) * 0.75)
+    const rate = (18 + inAct * 46) * act.rate * (1 + overall * 1.4) * warmup
     this.spawnTimer += dt * rate
 
     // 체력: 막 배율에 막 안 진행분을 얹는다
@@ -374,7 +399,11 @@ export class Game implements FireCtx {
       this.act = nowAct
       this.actIntro = ACT_INTRO_SECONDS
       this.bossSpawned = false
-      this.boss.reset()
+      // **살아 있는 보스는 그대로 둔다.** 예전엔 여기서 reset() 을 불러서, 20초 안에
+      // 못 잡은 보스가 고아가 됐다 — 5,355hp 짜리가 왕관도 체력바도 마커도 없이
+      // 평범한 Hex(46hp) 모습으로 돌아다녔다. 플레이어는 "왜 안 죽지"만 겪는다.
+      // 이번 막 보스는 아직 안 나왔으므로 bossSpawned 만 되돌리면 된다.
+      if (this.boss.idx < 0) this.boss.reset()
       // 막이 바뀌는 순간이 곧 이정표다 — 화면과 소리가 같이 알려야 한다
       shockwave(this.motes, this.player.x, this.player.y, 420, EVENT * 0.7, EVENT * 0.6, 0.8, 1.4)
       this.camera.shake(10, 5)
@@ -387,8 +416,6 @@ export class Game implements FireCtx {
       this.spawnBoss()
     }
 
-    // 보스가 죽었으면 표시를 지운다
-    if (this.boss.idx >= 0 && this.foes.alive[this.boss.idx] === 0) this.boss.reset()
     this.tickBoss(dt)
   }
 
@@ -404,7 +431,12 @@ export class Game implements FireCtx {
     if (boss.idx < 0) return
     const j = boss.idx
     const foes = this.foes
-    if (foes.alive[j] === 0) {
+    // **도장으로 확인한다. alive 만 보면 안 된다.**
+    // step() 순서가 `updateShots(보스 사망) → spawn → tickActs` 이고 acquire() 가 LIFO 라,
+    // 보스가 죽은 같은 스텝의 spawn 이 그 슬롯을 잡졸에게 넘긴다. alive 만 보면 1을 읽고
+    // 통과해서 잡졸 하나가 보스 정체성을 통째로 상속한다 — 크기 3.4배, 왕관, 돌진
+    // 962px/s, 소환, 수축장 피해까지. (적대 리뷰가 잡았다.)
+    if (foes.alive[j] === 0 || foes.stamp[j] !== boss.stamp) {
       boss.reset()
       return
     }
@@ -451,8 +483,8 @@ export class Game implements FireCtx {
           break
         }
         case BossState.Collapse:
-          // 수축장: 지금 플레이어가 선 자리를 중심으로 링이 좁혀온다.
-          // 서 있으면 죽고, 뛰면 산다.
+          // 수축장: 지금 플레이어가 선 자리를 중심으로 링이 좁혀와 **중심에서 터진다**.
+          // 링이 지나가기 전에 밖으로 나가야 산다.
           boss.ringX = this.player.x
           boss.ringY = this.player.y
           boss.ringR = 520
@@ -480,11 +512,19 @@ export class Game implements FireCtx {
         break
       }
       case BossState.Collapse: {
-        // 링이 좁혀온다. 밖에 있으면 안전, 링에 닿으면 아프다.
-        boss.ringR = Math.max(70, boss.ringR - 210 * dt)
+        // **링 안쪽이 위험하다. 밖이 안전하다.**
+        //
+        // 예전엔 링 테두리(±34)에만 피해를 줬는데, 링이 70에서 멈추므로 **가만히 서
+        // 있으면(중심, pd=0) 절대 안 맞고** 도망치면 링에 걸렸다 — 의도와 정반대로
+        // 도주를 처벌하고 정지를 보상했다(적대 리뷰가 잡았다). 주석엔 "서 있으면 죽고
+        // 뛰면 산다"고 적혀 있었는데 코드는 반대였다.
+        //
+        // 지금은 링이 지나간 **안쪽 전체**가 위험하다. 좁혀오는 210px/s 보다 빨리
+        // (플레이어 238) 밖으로 나가면 산다 — 그게 "뛰면 산다"다.
+        boss.ringR = Math.max(0, boss.ringR - 210 * dt)
         const pd = Math.hypot(this.player.x - boss.ringX, this.player.y - boss.ringY)
-        if (Math.abs(pd - boss.ringR) < 34 && this.player.hurt(16)) {
-          this.camera.shake(11, 10)
+        if (pd < boss.ringR && this.player.hurt(11 * dt * 60)) {
+          this.camera.shake(9, 10)
           this.sfx('hurt')
         }
         break
@@ -522,8 +562,13 @@ export class Game implements FireCtx {
       this.foes, act.boss, this.player.x, this.player.y,
       700, 820, hp / (FOE_STATS[act.boss]!.hp || 1), this.randFn, WORLD_R,
     )
-    if (i < 0) return
-    this.boss.spawn(i, this.foes.hp[i]!)
+    if (i < 0) {
+      // 풀이 가득 차 실패했다. bossSpawned 를 되돌려 다음 스텝에 재시도한다 —
+      // 안 그러면 그 막은 보스 없이 조용히 끝난다.
+      this.bossSpawned = false
+      return
+    }
+    this.boss.spawn(i, this.foes.hp[i]!, this.foes.stamp[i]!)
     // 보스는 화면에서 즉시 구분돼야 한다
     shockwave(this.motes, this.foes.x[i]!, this.foes.y[i]!, 260, EVENT * 0.8, 0.4, 0.6, 1.2)
     burst(this.motes, this.foes.x[i]!, this.foes.y[i]!, 34, EVENT * 0.8, 0.5, 0.7, 400, 1.0, 9, Shape.Crown)
@@ -583,7 +628,9 @@ export class Game implements FireCtx {
       if (this.foes.alive[j] === 0) continue
       const dx = this.foes.x[j]! - x
       const dy = this.foes.y[j]! - y
-      const rr = r + FOE_STATS[this.foes.type[j]!]!.radius
+      // 보스는 보이는 만큼 맞아야 한다 (렌더 3.4배)
+      const br = j === this.boss.idx ? BOSS_SCALE : 1
+      const rr = r + FOE_STATS[this.foes.type[j]!]!.radius * br
       if (dx * dx + dy * dy > rr * rr) continue
       out[m++] = j
     }
@@ -594,9 +641,18 @@ export class Game implements FireCtx {
     this.camera.shake(amount, decay)
   }
 
-  placeField(kind: number, x: number, y: number, radius: number, power: number, life: number): void {
-    const slot = this.loadout.weapons.find((w) => FIELD_OWNER[kind] === w.def)
-    this.fields.spawn(kind, x, y, radius, power, life, slot?.evolved ?? false, this.rng.next())
+  /**
+   * 지속 효과체를 놓는다.
+   *
+   * evolved 를 인자로 받는다. 예전엔 kind → 무기 → 슬롯 역조회 표(FIELD_OWNER)로
+   * 복원했는데, **호출자 4곳이 전부 slot 을 손에 쥐고 있었다** — 정보를 버린 뒤 표를
+   * 만들어 되찾는 꼴이었다(적대 리뷰가 잡았다). 표·선형 스캔·매 호출 클로저가 함께 사라졌다.
+   */
+  placeField(
+    kind: number, x: number, y: number, radius: number, power: number, life: number,
+    evolved: boolean, gen = 0,
+  ): void {
+    this.fields.spawn(kind, x, y, radius, power, life, evolved, this.rng.next(), gen)
   }
 
   pushFoes(x: number, y: number, radius: number, force: number): void {
@@ -646,20 +702,38 @@ export class Game implements FireCtx {
   private reapCache(x: number, y: number): void {
     if (!this.terrain.brokeCache) return
     this.terrain.brokeCache = false
-    // 크게 준다 — 파는 데 시간이 걸렸고 그동안 적이 몰려왔다. 위험의 대가다.
+    // 크게 주되 **한 레벨을 넘지 않는다.**
     //
-    // 값을 실측으로 잡았다: 처음엔 26+act*14 였는데, 봇이 58개를 파고도 Lv 23 이었다.
-    // 만든 게 있으나 마나였다는 뜻이다. 지금 곡선(지수)에서 Lv N 요구치가
-    // 9·1.115^(N-1) 이므로, 잔해 하나가 그 시점 한 레벨의 30~40% 는 돼야
-    // "파러 갈 이유"가 된다.
-    const value = (10 + this.act * 6) * (1 + this.player.level * 0.55)
+    // 두 번 틀렸다. ① 26+act*14 → 봇이 58개를 파고도 Lv 23. 있으나 마나였다.
+    // ② 레벨 비례로 고쳤는데 **value 가 오브 1개당 값인 걸 잊고 7개를 뿌렸다** —
+    //    Lv 10 에서 잔해 하나가 728 XP 인데 그 레벨 요구치는 38이었다. 19레벨이 한 번에
+    //    터진다. 주석에 적어 둔 "한 레벨의 30~40%" 라는 자기 기준을 20배 넘겼고,
+    //    인용한 곡선(9·1.115^N)조차 실제(7·1.115^N + 2N)와 달랐다(적대 리뷰가 잡았다).
+    //
+    // 이제 xpForLevel 을 직접 불러 그 시점 한 레벨의 55% 를 7개로 나눠 담는다.
+    // 파러 갈 이유는 되되 한 번에 여러 레벨이 터지지는 않는다.
+    // 한 레벨의 32%. 55% 였을 때 잔해를 135개 판 판이 Lv 83 이 됐다 —
+    // "파러 갈 이유"는 되되 레벨 곡선을 밀어버리면 안 된다.
+    const value = (xpForLevel(this.player.level) * 0.32) / 7
+    // 풀이 가득 차면 구슬이 안 나온다. 그러면 판 대가가 연출뿐이라 **직접 준다** —
+    // 잔해는 파는 데 시간과 위험이 들었으므로 조용히 증발시키면 안 된다.
+    let placed = 0
     for (let k = 0; k < 7; k++) {
       const a = this.rng.next() * Math.PI * 2
       const sp = 60 + this.rng.next() * 140
-      this.drops.spawn(x, y, Math.cos(a) * sp, Math.sin(a) * sp, value, Drop.Xp)
+      if (this.drops.spawn(x, y, Math.cos(a) * sp, Math.sin(a) * sp, value, Drop.Xp) >= 0) placed++
+    }
+    if (placed < 7) {
+      const lost = (7 - placed) * value
+      this.pendingLevels += this.player.gainXp(lost)
+      if (this.pendingLevels > 0 && this.phase === Phase.Playing) {
+        this.phase = Phase.LevelUp
+        this.loadout.recomputeStats(this.player)
+        this.pendingChoices = this.loadout.roll(this.rng, 3, this.player.stats.awaken)
+      }
     }
     // 회복도 하나. 잔해가 곧 보급이라 "파러 갈 이유"가 XP 하나로는 약하다.
-    this.drops.spawn(x, y, 0, 0, 28, Drop.Heal)
+    if (this.drops.spawn(x, y, 0, 0, 28, Drop.Heal) < 0) this.player.heal(28)
     shockwave(this.motes, x, y, 120, EVENT * 0.6, EVENT * 0.5, 0.4, 0.7)
     burst(this.motes, x, y, 16, 1.6, 1.4, 0.5, 260, 0.7, 6, Shape.Star)
     this.camera.shake(6, 12)
@@ -694,7 +768,9 @@ export class Game implements FireCtx {
           this.sfx('bigKill')
           this.camera.shake(16, 8)
         } else if (kind === Field.Echo) {
-          this.explode(x, y, r, power, 0.6, 2.0, 2.6)
+          // 이 반향이 죽인 적은 다음 세대 반향을 낳는다 — 세대가 필드에 실려야
+          // 스택을 넘어 살아남는다.
+          this.explode(x, y, r, power, 0.6, 2.0, 2.6, f.gen[i]! + 1)
         }
         f.kill(i)
         continue
@@ -814,9 +890,16 @@ export class Game implements FireCtx {
   private explode(
     x: number, y: number, radius: number, damage: number,
     cr: number, cg: number, cb: number,
+    gen = 0,
   ): void {
     const n = this.foesInRadius(x, y, radius, this.blastBuf)
-    this.echoDepth++
+    // 이 폭발이 몇 세대인지 알려 준다 — 여기서 죽은 적이 반향을 낳으면 gen+1 을 받는다.
+    // 예전엔 여기서 echoDepth 를 ++/-- 했는데, 그건 "반향 연쇄 깊이"가 아니라
+    // "임의의 폭발 안인가"를 재고 있었다. 그래서 미진화 반향은 혜성·신문·특이점으로
+    // 죽인 적에서 **절대 안 터졌고**(maxDepth 0 인데 depth 1), 진화 반향의 상한은
+    // 한 번도 발동하지 않았다.
+    const prevGen = this.echoGen
+    this.echoGen = gen
     for (let k = 0; k < n; k++) {
       const j = this.blastBuf[k]!
       if (this.foes.alive[j] === 0) continue
@@ -825,7 +908,7 @@ export class Game implements FireCtx {
       const d = Math.hypot(dx, dy) || 1
       this.damageFoe(j, damage, dx / d, dy / d)
     }
-    this.echoDepth--
+    this.echoGen = prevGen
     shockwave(this.motes, x, y, radius, cr, cg, cb, 0.4)
     burst(this.motes, x, y, 6, cr, cg, cb, radius * 2.4, 0.35, 4)
   }
@@ -882,7 +965,7 @@ export class Game implements FireCtx {
         const stat = FOE_STATS[foes.type[j]!]!
         const dx = foes.x[j]! - x
         const dy = foes.y[j]! - y
-        const rr = r + stat.radius
+        const rr = r + stat.radius * (j === this.boss.idx ? BOSS_SCALE : 1)
         if (dx * dx + dy * dy > rr * rr) continue
 
         this.foeStamp[j] = stamp
@@ -973,6 +1056,7 @@ export class Game implements FireCtx {
     const stat = FOE_STATS[foes.type[j]!]!
     const x = foes.x[j]!
     const y = foes.y[j]!
+    const isBossKill = j === this.boss.idx && foes.stamp[j] === this.boss.stamp
 
     // 화면에 2만 마리가 죽는 후반에 파티클을 그대로 뿌리면 풀이 순식간에 마른다.
     // 큰 적일수록 많이, 잔챙이는 적게.
@@ -985,19 +1069,34 @@ export class Game implements FireCtx {
     if (big) shockwave(this.motes, x, y, stat.radius * 2.2, stat.r * k, stat.g * k, stat.b * k, 0.3)
     this.sfx(big ? 'bigKill' : 'kill')
 
-    this.drops.spawn(
-      x, y,
-      (this.rng.next() - 0.5) * 60, (this.rng.next() - 0.5) * 60,
-      stat.xp, Drop.Xp,
-    )
+    // 보스는 체력이 4~40배인데 XP 는 잡졸과 같았다 — 최적 플레이가 "보스 무시"였다
+    // (적대 리뷰가 잡았다). 잡은 값어치가 있어야 고비가 된다.
+    if (isBossKill) {
+      const chunk = xpForLevel(this.player.level) * 0.55
+      for (let k = 0; k < 8; k++) {
+        const a = this.rng.next() * Math.PI * 2
+        const sp = 90 + this.rng.next() * 180
+        if (this.drops.spawn(x, y, Math.cos(a) * sp, Math.sin(a) * sp, chunk, Drop.Xp) < 0) {
+          this.pendingLevels += this.player.gainXp(chunk)
+        }
+      }
+      this.drops.spawn(x, y, 0, 0, 60, Drop.Heal)
+    } else {
+      this.drops.spawn(
+        x, y,
+        (this.rng.next() - 0.5) * 60, (this.rng.next() - 0.5) * 60,
+        stat.xp, Drop.Xp,
+      )
+    }
     // 회복은 드물어야 긴장이 산다
     if (this.rng.next() < 0.006) this.drops.spawn(x, y, 0, 0, 22, Drop.Heal)
 
     foes.kill(j)
     this.player.kills++
-    // 반향 — 내가 부순 자리에서 소리가 되돌아온다
-    const echo = this.loadout.findWeapon(W.Echo)
-    if (echo) echoKill(echo, this, x, y, this.echoDepth)
+    // 반향 — 내가 부순 자리에서 소리가 되돌아온다.
+    // 슬롯은 캐시한다. 매 킬(후반 초당 수백)마다 find() 로 클로저를 만들고 6칸을
+    // 스캔하면 hot path 에서 그냥 낭비다.
+    if (this.echoSlot) echoKill(this.echoSlot, this, x, y, this.echoGen)
   }
 
   // ── 드랍 ─────────────────────────────────────────────────────────────
@@ -1017,6 +1116,24 @@ export class Game implements FireCtx {
       const dx = p.x - drops.x[i]!
       const dy = p.y - drops.y[i]!
       const d2 = dx * dx + dy * dy
+
+      /**
+       * **수명.** 예전엔 획득으로만 죽었고 수명이 없었다.
+       *
+       * 킬이 초당 184인데 풀은 3,000 이고, 자석 밖에서 죽은 구슬은 9px 굴러가 영원히
+       * 남는다. 전체 킬의 2%만 사거리 밖에서 나도 포화다. 포화되면:
+       *  - 적을 아무리 죽여도 구슬이 안 나온다 (플레이어 눈엔 그냥 버그)
+       *  - **잔해를 파도 보상이 0이다** — spawn 이 -1 을 반환하는데 아무도 안 본다.
+       *    10초 걸려 판 대가가 "연출만".
+       *  - 킬 → XP 연결이 끊긴다. XP 곡선을 네 번 고친 진짜 원인이 여기였을 수 있다.
+       * (적대 리뷰가 잡았다.)
+       *
+       * 자석에 걸린 것은 안 죽는다 — 이미 오고 있으니 뺏으면 그게 더 억울하다.
+       */
+      if (drops.pulled[i] === 0 && drops.age[i]! > DROP_LIFE) {
+        drops.kill(i)
+        continue
+      }
 
       if (drops.pulled[i] === 0 && d2 < magnet2) drops.pulled[i] = 1
 
@@ -1190,7 +1307,7 @@ export class Game implements FireCtx {
       const dim = 0.45 + hpFrac * 0.55
       // 불타는 적은 주황으로 물든다. 장작불 빌드가 화면에 보여야 재미가 있다.
       const fire = foes.burn[i]! > 0 ? 1 : 0
-      const size = isBoss ? stat.radius * 3.4 : stat.radius
+      const size = isBoss ? stat.radius * BOSS_SCALE : stat.radius
       // 보스는 하나뿐이라 밝아도 안전하다. 잡졸은 기준선을 지킨다.
       const lum = (isBoss ? ACCENT : FOE_BASE) * hit * dim
       b.push(

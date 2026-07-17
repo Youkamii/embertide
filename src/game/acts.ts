@@ -26,13 +26,35 @@ export interface ActDef {
   readonly boss: FoeType
 }
 
+/**
+ * 막 난이도 곡선.
+ *
+ * hp 를 1 → 9.5 로 뒀을 때 **가만히 서 있어도 15분을 완주했다.**
+ * 실측: 15분 동안 받은 총 피해가 **167**(한 방도 안 된다), 180초 이후 계속 만피.
+ *
+ * 원인은 명확했다. 적 체력이 14.7배 느는 동안 플레이어 화력은 레벨성장 3배 ×
+ * 완력 2.4배 × 무기렙 3.3배 × 무기 6종 ≈ **140배**로 는다. 근접 무기(호·신성·위성)가
+ * 150px 반경에서 초당 만 단위를 넣으므로, 적이 마지막 150px 를 건너는 1초를 못 버틴다 —
+ * 적이 5,210마리 쌓여도 **닿지를 못한다.** 요새가 성립한다.
+ *
+ * 34 로도, 85 로도 여전했다. 실측(t=880s): 적 8,581마리인데 **120px 안에는 1마리**.
+ * 400px 안에 3,900 이 눌러오는데 못 뚫는다. 진화 무기 6종 — 특히 회오리(호 진화)가
+ * 360° 지속 AOE 라 120px 짜리 믹서를 만들고, 적이 그 0.8초(148px/s 로 120px)를
+ * 못 버틴다.
+ *
+ * 그래서 마지막 막 체력이 1 → 190(막 안 진행 포함 295배)다. Hex 가 13,500hp 라야
+ * 화망을 뚫고 몸에 닿는다. 이 숫자는 "적이 단단해서"가 아니라 **"플레이어가
+ * 140배 강해지기 때문"**이다 — 곡선의 기울기를 맞추는 것이지 적을 괴물로 만드는 게 아니다.
+ */
 export const ACT_SECONDS = 180
 export const ACTS: readonly ActDef[] = [
   {
+    // 1막은 **배우는 시간**이다. 접촉 피해가 진짜가 되자 여기서 12~23초 만에 죽었다
+    // (무기 1개, 화력 없음). 튜토리얼이 없는 게임이라 1막이 곧 튜토리얼이다.
     name: '잔불', sub: '별이 하나 꺼졌다',
     tintA: [0.30, 0.13, 0.55], tintB: [0.05, 0.28, 0.45],
     weights: [{ type: Foe.Mote, w: 1 }],
-    rate: 1, hp: 1, boss: Foe.Eye,
+    rate: 0.5, hp: 1, boss: Foe.Eye,
   },
   {
     name: '조수', sub: '허공이 밀려온다',
@@ -40,7 +62,7 @@ export const ACTS: readonly ActDef[] = [
     weights: [
       { type: Foe.Mote, w: 0.62 }, { type: Foe.Husk, w: 0.26 }, { type: Foe.Wisp, w: 0.12 },
     ],
-    rate: 1.5, hp: 1.9, boss: Foe.Hex,
+    rate: 1.6, hp: 2.8, boss: Foe.Hex,
   },
   {
     name: '균열', sub: '무언가 들여다본다',
@@ -49,7 +71,7 @@ export const ACTS: readonly ActDef[] = [
       { type: Foe.Mote, w: 0.44 }, { type: Foe.Husk, w: 0.24 },
       { type: Foe.Wisp, w: 0.18 }, { type: Foe.Hex, w: 0.14 },
     ],
-    rate: 2.3, hp: 3.4, boss: Foe.Eye,
+    rate: 2.6, hp: 7, boss: Foe.Eye,
   },
   {
     name: '심연', sub: '빛이 닿지 않는 곳',
@@ -58,7 +80,7 @@ export const ACTS: readonly ActDef[] = [
       { type: Foe.Mote, w: 0.34 }, { type: Foe.Husk, w: 0.24 },
       { type: Foe.Wisp, w: 0.18 }, { type: Foe.Hex, w: 0.2 }, { type: Foe.Eye, w: 0.04 },
     ],
-    rate: 3.2, hp: 5.8, boss: Foe.Hex,
+    rate: 3.6, hp: 17, boss: Foe.Hex,
   },
   {
     // 마지막 막은 잔챙이가 없다. 4막과 종족 구성이 같으면 마지막 6분이 한 장면이다
@@ -69,7 +91,7 @@ export const ACTS: readonly ActDef[] = [
       { type: Foe.Husk, w: 0.34 }, { type: Foe.Hex, w: 0.38 },
       { type: Foe.Wisp, w: 0.14 }, { type: Foe.Eye, w: 0.14 },
     ],
-    rate: 4.6, hp: 9.5, boss: Foe.Eye,
+    rate: 5.2, hp: 42, boss: Foe.Eye,
   },
 ]
 

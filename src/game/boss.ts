@@ -44,6 +44,17 @@ export class Boss {
   /** Foes 풀에서의 인덱스. -1 이면 보스가 없다. */
   idx = -1
   maxHp = 0
+  /**
+   * 신원 확인용 도장.
+   *
+   * **인덱스만으로는 보스를 식별할 수 없다.** Foes 풀의 acquire() 가 LIFO 라 방금 죽은
+   * 슬롯을 최우선 재사용하는데, step() 순서가 `updateShots(보스 사망) → spawn → tickActs`
+   * 라서 보스가 죽은 **같은 스텝의 spawn 이 그 슬롯을 잡졸에게 넘긴다**. 그러면
+   * `alive[idx] === 0` 검사가 1을 보고 통과해 잡졸 하나가 보스 정체성을 통째로 상속한다
+   * — 크기 3.4배, 왕관, 화면 밖 마커, 돌진 962px/s, 소환, 수축장 피해까지 전부.
+   * (적대 리뷰가 잡았다. boss.test.ts 는 Boss 를 단독 테스트해서 이 경로를 못 봤다.)
+   */
+  stamp = 0
   state: BossStateType = BossState.Stalk
   timer = 0
   /** 돌진 방향 (Aim 끝에 확정) */
@@ -59,15 +70,20 @@ export class Boss {
   reset(): void {
     this.idx = -1
     this.maxHp = 0
+    this.stamp = 0
     this.state = BossState.Stalk
     this.timer = 0
     this.cycle = 0
     this.ringR = 0
+    // 조준 방향도 되돌린다 — 안 그러면 새 보스가 이전 보스의 마지막 조준을 물려받는다
+    this.dirX = 1
+    this.dirY = 0
   }
 
-  spawn(idx: number, maxHp: number): void {
+  spawn(idx: number, maxHp: number, stamp: number): void {
     this.idx = idx
     this.maxHp = maxHp
+    this.stamp = stamp
     this.state = BossState.Stalk
     this.timer = DURATION[BossState.Stalk]!
     this.cycle = 0

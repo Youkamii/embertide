@@ -13,7 +13,7 @@ import { Boss, BossState } from './boss'
 
 function run(seed: number, steps: number, hpFrac = 1): { boss: Boss; seen: number[] } {
   const boss = new Boss()
-  boss.spawn(0, 1000)
+  boss.spawn(0, 1000, 1)
   const rng = new Rng(seed)
   const seen: number[] = []
   for (let i = 0; i < steps; i++) {
@@ -45,7 +45,7 @@ describe('보스 패턴', () => {
 
   it('예고 중엔 멈춘다 (움직이면서 예고하면 못 읽는다)', () => {
     const boss = new Boss()
-    boss.spawn(0, 100)
+    boss.spawn(0, 100, 1)
     boss.state = BossState.Aim
     expect(boss.speedScale()).toBe(0)
     boss.state = BossState.Stagger
@@ -54,7 +54,7 @@ describe('보스 패턴', () => {
 
   it('돌진은 평소보다 확실히 빠르다 (안 그러면 돌진이 아니다)', () => {
     const boss = new Boss()
-    boss.spawn(0, 100)
+    boss.spawn(0, 100, 1)
     boss.state = BossState.Stalk
     const walk = boss.speedScale()
     boss.state = BossState.Charge
@@ -63,7 +63,7 @@ describe('보스 패턴', () => {
 
   it('빈틈에서만 피해가 증폭된다', () => {
     const boss = new Boss()
-    boss.spawn(0, 100)
+    boss.spawn(0, 100, 1)
     for (const st of [BossState.Stalk, BossState.Aim, BossState.Charge, BossState.Summon, BossState.Collapse]) {
       boss.state = st as never
       expect(boss.damageScale(), `state ${st}`).toBe(1)
@@ -87,7 +87,7 @@ describe('보스 패턴', () => {
 
   it('예고 진행도가 0에서 1로 찬다 (연출이 이걸로 차오른다)', () => {
     const boss = new Boss()
-    boss.spawn(0, 100)
+    boss.spawn(0, 100, 1)
     boss.state = BossState.Aim
     boss.timer = 1.1
     expect(boss.telegraph()).toBeCloseTo(0, 1)
@@ -99,7 +99,7 @@ describe('보스 패턴', () => {
 
   it('예고 시간이 읽을 만하다 (0.8초 아래면 반응이 불가능하다)', () => {
     const boss = new Boss()
-    boss.spawn(0, 100)
+    boss.spawn(0, 100, 1)
     boss.state = BossState.Stalk
     // 상태 전이를 돌려 Aim 에 들어간 순간의 timer 를 본다
     const rng = new Rng(1)
@@ -115,7 +115,7 @@ describe('보스 패턴', () => {
     const boss = new Boss()
     expect(boss.alive).toBe(false)
     expect(boss.tick(1 / 60, new Rng(1), 1)).toBeNull()
-    boss.spawn(5, 100)
+    boss.spawn(5, 100, 1)
     expect(boss.alive).toBe(true)
     boss.reset()
     expect(boss.alive).toBe(false)

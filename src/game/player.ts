@@ -46,7 +46,9 @@ export interface Stats {
 
 export function baseStats(): Stats {
   return {
-    maxHp: 100,
+    // 접촉 피해가 진짜가 되자 시작 체력 100 이 8~9방이었다 — 봇이 12초에 죽었다.
+    // Lv 1 은 무기 1개뿐이라 화력이 없고, 여기서 죽으면 게임을 시작도 못 한다.
+    maxHp: 180,
     speed: 238,
     damage: 1,
     cooldown: 1,
@@ -56,7 +58,7 @@ export function baseStats(): Stats {
     multi: 0,
     magnet: 95,
     regen: 0,
-    iframe: 0.55,
+    iframe: 0.4,
     greed: 1,
     critChance: 0.05,
     critMult: 2,
@@ -93,7 +95,14 @@ export function applyLevelGrowth(s: Stats, level: number): void {
   s.maxHp += 7 * n
   s.damage *= 1 + 0.035 * n
   s.speed *= 1 + 0.006 * n
-  s.magnet *= 1 + 0.02 * n
+  // **자석은 레벨로 안 키운다.**
+  //
+  // 키웠더니 Lv 78 에서 241px 이 됐는데 킬은 120px 에서 일어난다 — 모든 XP 가 자석
+  // 안에 떨어져서 **플레이어가 움직일 이유가 영영 없어졌다.** 가만히 서서 15분을
+  // 완주하고 Lv 78 에 만피였다(실측: 15분간 받은 총 피해 **167**).
+  // 적 체력을 295배까지 올려도 안 고쳐졌다 — 숫자가 아니라 구조의 문제였다.
+  // 이 장르가 자석을 성장 축에서 빼는 데는 이유가 있다: **주우러 가는 게 곧 이동 동기다.**
+  // 자석을 키우고 싶으면 탐욕(P.Greed)을 찍으면 된다 — 그건 슬롯을 쓰는 선택이다.
 
   // 마일스톤: 5레벨마다 굵게. 순환시켜 한 축만 커지지 않게 한다.
   const milestones = Math.floor(level / 5)
@@ -118,7 +127,7 @@ export function levelGainOf(level: number): LevelGain {
     maxHp: Math.round(after.maxHp - before.maxHp),
     damage: Math.round((after.damage / before.damage - 1) * 1000) / 10,
     speed: Math.round((after.speed / before.speed - 1) * 1000) / 10,
-    magnet: Math.round((after.magnet / before.magnet - 1) * 1000) / 10,
+    magnet: 0,
     milestone: level % 5 === 0 ? MILESTONE_NAMES[Math.floor(level / 5) % 4]! : '',
   }
 }
@@ -131,9 +140,15 @@ export function levelGainOf(level: number): LevelGain {
  * 잘 굴러가는 빌드가 Lv 111 까지 갔다.
  */
 export function xpForLevel(level: number): number {
-  // 첫 두 레벨은 아주 싸게 — 첫 레벨업이 늦으면 아무도 기다리지 않는다.
-  // 여기가 5 → 11 로 오르자 봇이 8초 동안 Lv 1 에 머물렀다(테스트가 잡았다).
-  if (level <= 2) return 4 + level * 2
+  /**
+   * 첫 세 레벨은 아주 싸다.
+   *
+   * 튜토리얼이 없는 게임이라 **첫 레벨업 화면이 곧 첫 수업**이다 — "고르면 강해진다"를
+   * 거기서 배운다. 실측으로 첫 레벨업이 13~17초였는데, 그동안 플레이어는 아무것도
+   * 안 배우고 도망만 친다. 1막 밀도를 낮춘 뒤라 킬이 느려서 더 밀렸다.
+   * 3 XP = Mote 3마리 = 대략 4~6초.
+   */
+  if (level <= 3) return 1 + level * 2
   return Math.floor(7 * Math.pow(1.115, level - 1) + level * 2)
 }
 
