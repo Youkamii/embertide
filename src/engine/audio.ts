@@ -293,9 +293,7 @@ export class Audio {
     }
   }
 
-  get ready(): boolean {
-    return this.ctx !== null
-  }
+  // ready 게터가 있었지만 호출부 0이라 지웠다 (#9).
 }
 
 // A 에올리안 — 어둡고 긴장된 결. 5분 내내 들어야 하므로 자극적이지 않게.

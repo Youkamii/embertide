@@ -189,7 +189,7 @@ export class Game implements FireCtx {
     this.echoGen = 0
     this.echoSlot = null
     // 지형은 시드에서 나온다. 같은 시드 = 같은 맵.
-    this.terrain.generate(seed, WORLD_R, 1)
+    this.terrain.generate(seed, WORLD_R)
     // 시작 무기는 시드로 정한다 — 매판 다른 빌드로 출발한다.
     // 스스로 죽일 수 있는 무기만 (반향·정지로 시작하면 영원히 0킬이다)
     this.loadout.reset(STARTER_WEAPONS[this.rng.int(STARTER_WEAPONS.length)]!)
@@ -314,12 +314,19 @@ export class Game implements FireCtx {
     if (res.contactDamage > 0) {
       const crowd = 1 + Math.min(res.contactCount, 8) / 8
       if (this.player.hurt(res.contactDamage * crowd)) {
-        // 피격 반동 — 문 것들을 한 뼘(~30px) 밀어낸다.
+        // 피격 반동 — 문 것들을 한 뼘(~30px) 밀어낸다. **움직이는 자의 것이다.**
+        //
         // 무적이 끝나는 순간 같은 무리에게 그대로 다시 물리면 포위가 즉사 나선이
         // 된다: 공백이 긴 시작 무기 5종(광선·신문·호·위성·혜성)이 봇 계측에서
         // 전부 22~40s 에 여기서 죽었다. 밀어내는 한 뼘이 "맞았지만 빠져나갈 수
         // 있다"를 만든다 — 무기별 버프 대신 보편 장치 하나로 복권을 없앤다.
-        this.pushFoes(this.player.x, this.player.y, 120, 340)
+        //
+        // 정지 상태엔 안 준다. 무조건 줬더니 **가만히 서서 완주가 됐다**(테스트가
+        // 잡았다) — 반동은 빠져나가려는 움직임을 살리는 장치지, 제자리 요새의
+        // 보호막이 아니다.
+        if (Math.hypot(this.player.vx, this.player.vy) > 40) {
+          this.pushFoes(this.player.x, this.player.y, 120, 340)
+        }
         this.camera.shake(9, 12)
         this.sfx('hurt')
       }
@@ -375,7 +382,12 @@ export class Game implements FireCtx {
 
     while (this.spawnTimer >= 1) {
       this.spawnTimer -= 1
-      if (this.foes.count >= MAX_FOES - 32) break
+      if (this.foes.count >= MAX_FOES - 32) {
+        // 풀이 찼으면 예산도 버린다. 이월시키면 대량 처치로 풀이 비는 순간
+        // 한 스텝에 수천 마리가 재충전되는 1프레임 스파이크가 생긴다 (#9).
+        this.spawnTimer = 0
+        break
+      }
 
       const type = this.rollFoeType(act)
 

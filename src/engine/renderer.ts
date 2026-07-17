@@ -94,7 +94,5 @@ export class Renderer {
     this.bloom.render(this.scene.tex, this.width, this.height, time, hurt, danger)
   }
 
-  get aspect(): number {
-    return this.width / this.height
-  }
+  // aspect 게터가 있었지만 호출부 0이라 지웠다 (#9).
 }

@@ -69,11 +69,5 @@ export class Camera {
     return Math.hypot(halfW, halfH) * 1.12
   }
 
-  worldToScreen(wx: number, wy: number, screenW: number, screenH: number): { x: number; y: number } {
-    const v = this.toView(screenW, screenH)
-    return {
-      x: ((wx - v.x) * v.sx * 0.5 + 0.5) * screenW,
-      y: (0.5 - (wy - v.y) * v.sy * 0.5) * screenH,
-    }
-  }
+  // worldToScreen 이 있었지만 호출부 0 + 호출마다 객체 할당이라 지웠다 (#9).
 }

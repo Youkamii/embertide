@@ -27,34 +27,8 @@ export class Rng {
     return Math.floor(this.next() * n)
   }
 
-  /** [min, max) */
-  range(min: number, max: number): number {
-    return min + this.next() * (max - min)
-  }
-
-  /** [0, 2π) */
-  angle(): number {
-    return this.next() * Math.PI * 2
-  }
-
-  bool(p = 0.5): boolean {
-    return this.next() < p
-  }
-
-  pick<T>(arr: readonly T[]): T {
-    return arr[this.int(arr.length)]!
-  }
-
-  /** 제자리 셔플 (Fisher–Yates) */
-  shuffle<T>(arr: T[]): T[] {
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = this.int(i + 1)
-      const t = arr[i]!
-      arr[i] = arr[j]!
-      arr[j] = t
-    }
-    return arr
-  }
+  // range/angle/bool/pick/shuffle 이 있었지만 전부 호출부 0이라 지웠다 (#9).
+  // 필요해지면 그때 만든다 — 안 쓰는 API 는 다음 사람을 오도한다.
 
   /** 가중치 추첨. weights 합이 0이면 -1. */
   weighted(weights: readonly number[]): number {

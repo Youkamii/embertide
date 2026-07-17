@@ -113,7 +113,9 @@ describe.skipIf(!RUN_SIM)('밸런스 (봇 자동 플레이)', () => {
   const SEEDS = [1, 42, 1337, 2026, 8888, 31337]
   let runs: RunStat[] = []
 
-  it('통계를 찍는다', () => {
+  // 6판 × 15분 시뮬레이션이라 30초쯤 걸린다 — 기본 타임아웃(5s)이면 통계를 다
+  // 찍고도 항상 exit 1 로 끝나서, 계측기를 돌릴 때마다 "고장난 척"을 했다.
+  it('통계를 찍는다', { timeout: 600000 }, () => {
     runs = SEEDS.map((s) => playRun(s, true))
     const avg = (f: (r: RunStat) => number) => runs.reduce((a, r) => a + f(r), 0) / runs.length
     const wins = runs.filter((r) => r.won).length
@@ -134,8 +136,11 @@ describe.skipIf(!RUN_SIM)('밸런스 (봇 자동 플레이)', () => {
     expect(runs.length).toBe(SEEDS.length)
   })
 
-  it('봇이 초반 30초는 넘긴다 (시작하자마자 죽으면 아무도 두 번 안 한다)', () => {
-    for (const r of runs) expect(r.survived, `seed ${r.seed}`).toBeGreaterThan(30)
+  it('봇이 첫 1분은 넘긴다 (시작하자마자 죽으면 아무도 두 번 안 한다)', () => {
+    // 30초였을 때 35s 사망(시드 8888)이 5초 차로 통과했다 — 문턱이 물러서
+    // "초반 즉사" 회귀를 못 잡는 계측이었다. 실측 최단 사망이 489s 인 지금,
+    // 60s 는 여유가 8배라 우연으로는 안 뚫린다.
+    for (const r of runs) expect(r.survived, `seed ${r.seed}`).toBeGreaterThan(60)
   })
 
   it('레벨이 오른다 (성장이 멈추면 조합이 안 굴러간다)', () => {

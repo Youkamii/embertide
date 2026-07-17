@@ -106,31 +106,8 @@ export class SpatialHash {
     return n
   }
 
-  /**
-   * 콜백 방식 순회. out 배열 크기에 안 걸리므로 밀집 구간에서 안전하다.
-   * 반경 판정은 콜백이 한다.
-   */
-  forEachNear(x: number, y: number, r: number, fn: (i: number) => void): void {
-    const cs = this.cellSize
-    let cx0 = ((x - r - this.minX) / cs) | 0
-    let cx1 = ((x + r - this.minX) / cs) | 0
-    let cy0 = ((y - r - this.minY) / cs) | 0
-    let cy1 = ((y + r - this.minY) / cs) | 0
-    if (cx0 < 0) cx0 = 0
-    if (cy0 < 0) cy0 = 0
-    if (cx1 >= this.cols) cx1 = this.cols - 1
-    if (cy1 >= this.rows) cy1 = this.rows - 1
-
-    for (let cy = cy0; cy <= cy1; cy++) {
-      const rowBase = cy * this.cols
-      for (let cx = cx0; cx <= cx1; cx++) {
-        const c = rowBase + cx
-        const s = this.cellStart[c]!
-        const e = this.cellStart[c + 1]!
-        for (let k = s; k < e; k++) fn(this.items[k]!)
-      }
-    }
-  }
+  // forEachNear(콜백 순회)가 있었지만 호출부 0 + query 와 9줄 복붙 + 클로저가
+  // "할당 0" 원칙과 충돌해서 지웠다 (#9). 밀집 구간이 문제면 query 버퍼를 키운다.
 
   get size(): number {
     return this.built

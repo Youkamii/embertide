@@ -4,7 +4,6 @@
  * 5분이 끝나면 숫자 하나가 남아야 한다. 그래야 "한 판 더"가 생긴다.
  */
 import { ACTS } from './acts'
-import { dailySeed } from '../engine/rng'
 import type { Game } from './game'
 import { RUN_SECONDS } from './game'
 import { WEAPONS } from './weapons'
@@ -28,49 +27,62 @@ export interface RunResult {
 
 /**
  * 점수 공식.
- * 처치가 기본이고, 완주가 크게 붙고, 진화는 조합을 맞춘 값이라 후하게 준다.
- * 무피해 보너스는 넣지 않았다 — 그걸 넣으면 도망만 다니는 게 최적해가 된다.
+ *
+ * 처치가 킬 수에 선형(×12)이던 시절, 후반 킬 인플레이션(실측 12만~19만)이 등급을
+ * **단독** 결정했다 — 킬 점수 하나(213만)가 S+ 문턱(160만)을 넘고, 완주·진화·막
+ * 도달·레벨을 전부 합쳐도 7만이 안 됐다. "완주가 크게 붙는다"는 이 자리 주석과
+ * 산수가 정반대였다.
+ *
+ * 지금은 성취가 뼈대다: 생존(초당 300)과 처치(×2)가 몸통을 채우고, 진화(1.5만)·
+ * 막(8천)·완주(12만)가 등급을 가른다. 무피해 보너스는 여전히 없다(도망만 다니는 게
+ * 최적해가 되면 안 된다). 피해 감점도 없앴다 — ×4 에 상한 6000이라 몇 번 맞으면
+ * 즉시 바닥에 붙는 상수였고, 그 정보는 이미 생존 시간과 완주에 들어 있다.
  */
 export function computeScore(g: Game): number {
   const p = g.player
   let s = 0
-  s += p.kills * 12
-  s += Math.floor(g.elapsed) * 24
-  s += p.level * 140
-  s += g.loadout.weapons.filter((w) => w.evolved).length * 1600
+  s += p.kills * 2
+  s += Math.floor(g.elapsed) * 300
+  s += p.level * 800
+  s += g.loadout.weapons.filter((w) => w.evolved).length * 15000
   // 막을 넘길 때마다 크게 — 15분에서 "어디까지 갔나"가 곧 실력이다
-  s += g.act * 3500
-  if (g.elapsed >= RUN_SECONDS) s += 20000
-  // 맞을수록 깎이되 바닥은 있다. 감점이 무한하면 겁쟁이 플레이가 정답이 된다.
-  s -= Math.min(6000, Math.floor(p.damageTaken * 4))
+  s += g.act * 8000
+  if (g.elapsed >= RUN_SECONDS) s += 120000
   return Math.max(0, Math.floor(s))
 }
 
 /**
- * 등급 문턱. 15분·12무기로 늘어나며 점수 규모가 3배쯤 커졌다
- * (봇 실측 178,000킬 → 처치 점수만 200만). 문턱도 같이 올려야 S 가 S 로 남는다.
+ * 등급 문턱 (봇 실측으로 보정: 완주 936k, 최고 근접 실패 748k, 3막 8분 사망 322k).
+ * S+ 는 문턱과 무관하게 **완주의 것**이다 — gradeOf 가 구조로 강제한다.
  */
 const GRADES: readonly [number, string][] = [
-  [1600000, 'S+'],
-  [900000, 'S'],
-  [450000, 'A'],
-  [180000, 'B'],
-  [60000, 'C'],
-  [15000, 'D'],
+  [900000, 'S+'],
+  [700000, 'S'],
+  [550000, 'A'],
+  [350000, 'B'],
+  [180000, 'C'],
+  [70000, 'D'],
   [0, 'E'],
 ]
 
-export function gradeOf(score: number): string {
-  for (const [min, g] of GRADES) if (score >= min) return g
+export function gradeOf(score: number, won: boolean): string {
+  for (const [min, g] of GRADES) {
+    if (score >= min) {
+      // 킬 파밍이 아무리 커도 S+ 는 버텨낸 사람만 단다.
+      if (g === 'S+' && !won) return 'S'
+      return g
+    }
+  }
   return 'E'
 }
 
 export function makeResult(g: Game, seedLabel: string): RunResult {
   const score = computeScore(g)
+  const won = g.elapsed >= RUN_SECONDS
   return {
     seedLabel,
     score,
-    grade: gradeOf(score),
+    grade: gradeOf(score, won),
     act: g.act + 1,
     actName: ACTS[g.act]!.name,
     survived: g.elapsed,
@@ -89,7 +101,9 @@ export function makeResult(g: Game, seedLabel: string): RunResult {
 
 // ── 기록 저장 ─────────────────────────────────────────────────────────
 
-const KEY = 'embertide:records:v1'
+// v2: 점수 공식 교체(2026-07-17). 옛 기록(킬 선형 시절 200만대)과 비교가 성립하지
+// 않아 키를 올린다 — 안 올리면 새 공식으론 영원히 못 깨는 유령 기록이 남는다.
+const KEY = 'embertide:records:v2'
 
 export interface Records {
   /** 시드 라벨 → 그 시드의 최고 점수 */
@@ -155,6 +169,4 @@ export function saveRecord(r: RunResult): { records: Records; isBest: boolean } 
   return { records: rec, isBest }
 }
 
-export function todayLabel(): string {
-  return dailySeed(new Date()).label
-}
+// todayLabel() 이 있었지만 호출부 0이라 지웠다 (#9) — 데일리 라벨은 main 이 dailySeed 로 직접 만든다.

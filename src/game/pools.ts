@@ -118,11 +118,6 @@ export class Foes extends PoolBase {
     this.stamp = new Int32Array(capacity)
   }
 
-  /** 다음 개체에 붙을 도장. spawn 이 쓰기 전에 미리 알아야 하는 쪽(보스)이 읽는다. */
-  peekStamp(): number {
-    return this.stampCounter
-  }
-
   spawn(x: number, y: number, type: FoeType, hp: number, seed: number): number {
     const i = this.acquire()
     if (i < 0) return -1
@@ -337,8 +332,7 @@ export class Fields extends PoolBase {
 export const Drop = {
   Xp: 0,
   Heal: 1,
-  /** 별의 잔해 — 지형에 묻혀 있다. 파내야 나오고, 크게 준다. */
-  Cache: 2,
+  // Cache(잔해 드랍 타입)가 선언돼 있었지만 잔해 보상은 Xp/Heal 로 뿌려져 참조 0이었다 (#9).
 } as const
 export type DropType = (typeof Drop)[keyof typeof Drop]
 

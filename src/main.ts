@@ -351,7 +351,10 @@ function boot(): void {
       (bossHp >= 0 ? `\n◆ 보스 ${bossHp}%` : '') +
       (debug
         ? `\n\n적 ${game.foes.count.toLocaleString()}  탄 ${game.shots.count}` +
-          `  입자 ${game.motes.count.toLocaleString()}\nfps ${fps.toFixed(0)}`
+          `  입자 ${game.motes.count.toLocaleString()}\nfps ${fps.toFixed(0)}` +
+          // 배치 용량 초과 = 이번 프레임에 flush 가 몇 번 더 돌았나. 조용히 쌓이면
+          // 아무도 모르는 성능 누수라, 계기판이 이 카운터의 유일한 독자다 (#9).
+          (renderer.batch.overflows > 0 ? `  배치초과 ${renderer.batch.overflows}` : '')
         : '')
 
     // 막 전환 — 화면 가운데에 잠깐. 15분이 5분×3이 아니라 하나의 곡선이 되려면

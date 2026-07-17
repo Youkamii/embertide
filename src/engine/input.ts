@@ -83,16 +83,7 @@ export class Input {
     canvas.addEventListener('contextmenu', this.onContextMenu)
   }
 
-  dispose(): void {
-    window.removeEventListener('keydown', this.onKeyDown)
-    window.removeEventListener('keyup', this.onKeyUp)
-    window.removeEventListener('blur', this.onBlur)
-    this.canvas.removeEventListener('pointerdown', this.onPointerDown)
-    this.canvas.removeEventListener('pointermove', this.onPointerMove)
-    this.canvas.removeEventListener('pointerup', this.onPointerUp)
-    this.canvas.removeEventListener('pointercancel', this.onPointerUp)
-    this.canvas.removeEventListener('contextmenu', this.onContextMenu)
-  }
+  // dispose() 가 있었지만 이 앱은 부팅이 곧 수명이라 호출부가 없어 지웠다 (#9).
 
   /** 매 프레임 시작에 1회. 세 입력을 하나의 이동 벡터로 합친다. */
   update(): void {
@@ -166,13 +157,7 @@ export class Input {
     this.pointerPressed = false
   }
 
-  isDown(key: string): boolean {
-    return this.keys.has(key)
-  }
-
-  get moving(): boolean {
-    return this.move.x !== 0 || this.move.y !== 0
-  }
+  // isDown/moving 게터가 있었지만 호출부 0이라 지웠다 (#9).
 }
 
 const SCROLL_KEYS = new Set([

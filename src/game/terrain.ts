@@ -109,7 +109,8 @@ export class Terrain {
    * 값 노이즈로 덩어리를 만들고 → 셀룰러 오토마타로 다듬고 → 시작점 주변을 비우고
    * → 연결되지 않은 구역을 뚫어 준다. 갇히는 시드가 하나라도 있으면 그 판은 사기다.
    */
-  generate(seed: number, worldR: number, hardness: number): void {
+  // hardness 인자가 있었지만 모든 호출자가 1을 넘겨 no-op 이었다 (#9) — 지웠다.
+  generate(seed: number, worldR: number): void {
     const rng = new Rng(seed ^ 0x7e44a1)
     const { cols, rows } = this
     const solid = new Uint8Array(cols * rows)
@@ -219,7 +220,7 @@ export class Terrain {
             n += solid[ny * cols + nx]!
           }
         }
-        const h = (26 + n * 9) * hardness
+        const h = 26 + n * 9
         this.hp[i] = h
         this.maxHp[i] = h
         this.tint[i] = rng.next()

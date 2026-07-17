@@ -10,7 +10,7 @@ import { WORLD_R } from './game'
 
 function build(seed: number): Terrain {
   const t = new Terrain(WORLD_R)
-  t.generate(seed, WORLD_R, 1)
+  t.generate(seed, WORLD_R)
   return t
 }
 
@@ -228,11 +228,11 @@ describe('별의 잔해', () => {
 
   it('generate 를 다시 부르면 잔해도 새로 깔린다 (재시작 시 이전 판이 남으면 안 된다)', () => {
     const t = new Terrain(WORLD_R)
-    t.generate(42, WORLD_R, 1)
+    t.generate(42, WORLD_R)
     const before = t.cacheCount()
     // 다 파낸 척
     t.cache.fill(0)
-    t.generate(42, WORLD_R, 1)
+    t.generate(42, WORLD_R)
     expect(t.cacheCount()).toBe(before)
   })
 })

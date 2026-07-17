@@ -326,6 +326,38 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
 }
 
 /**
+ * 링 스폰 위치 스크래치 — spawnRing/spawnCluster 가 공유한다 (프레임당 몇 번뿐).
+ *
+ * **일반 변수(float64)여야 한다.** Float32Array 로 뒀더니 좌표 하위 비트가 잘려
+ * 시뮬레이션이 리팩토링 전과 비트 단위로 갈라졌다 — 접촉·킬 타이밍이 미세하게
+ * 밀리면서 칼끝에 있던 결정론 테스트(seed 5, 10s 내 첫 레벨업)가 뒤집혔다.
+ */
+let ringX = 0
+let ringY = 0
+
+/**
+ * 링 밖 랜덤 위치 하나를 ringX/ringY 에 담는다.
+ * 월드 밖이면 반대편으로 접는다 — 안 그러면 경계 근처에서 스폰이 한쪽으로 쏠린다.
+ * (spawnRing/spawnCluster 에 7줄이 verbatim 복붙돼 있었고, 접는 이유 주석이 한쪽에만
+ * 남아 이미 열화가 시작돼 있었다 — #9)
+ */
+function rollRingPos(
+  cx: number, cy: number, ringMin: number, ringMax: number,
+  rand: () => number, worldR: number,
+): void {
+  const a = rand() * Math.PI * 2
+  const d = ringMin + rand() * (ringMax - ringMin)
+  let x = cx + Math.cos(a) * d
+  let y = cy + Math.sin(a) * d
+  if (Math.hypot(x, y) > worldR * 0.97) {
+    x = cx - Math.cos(a) * d
+    y = cy - Math.sin(a) * d
+  }
+  ringX = x
+  ringY = y
+}
+
+/**
  * 무리 스폰. 잔챙이를 낱개로 흩뿌리면 군체가 아니라 점묘화가 된다 —
  * 한 덩어리로 몰려와야 "밀려온다"가 된다.
  */
@@ -342,14 +374,9 @@ export function spawnCluster(
   rand: () => number,
   worldR: number,
 ): number {
-  const a = rand() * Math.PI * 2
-  const d = ringMin + rand() * (ringMax - ringMin)
-  let bx = cx + Math.cos(a) * d
-  let by = cy + Math.sin(a) * d
-  if (Math.hypot(bx, by) > worldR * 0.97) {
-    bx = cx - Math.cos(a) * d
-    by = cy - Math.sin(a) * d
-  }
+  rollRingPos(cx, cy, ringMin, ringMax, rand, worldR)
+  const bx = ringX
+  const by = ringY
   const stat = FOE_STATS[type]!
   let spawned = 0
   for (let k = 0; k < count; k++) {
@@ -375,18 +402,9 @@ export function spawnRing(
   rand: () => number,
   worldR: number,
 ): number {
-  const a = rand() * Math.PI * 2
-  const d = ringMin + rand() * (ringMax - ringMin)
-  let x = cx + Math.cos(a) * d
-  let y = cy + Math.sin(a) * d
-  // 월드 밖이면 반대편으로 접는다 (안 그러면 경계 근처에서 스폰이 한쪽으로 쏠린다)
-  const rr = Math.hypot(x, y)
-  if (rr > worldR * 0.97) {
-    x = cx - Math.cos(a) * d
-    y = cy - Math.sin(a) * d
-  }
+  rollRingPos(cx, cy, ringMin, ringMax, rand, worldR)
   const stat = FOE_STATS[type]!
-  return foes.spawn(x, y, type, stat.hp * hpScale, rand())
+  return foes.spawn(ringX, ringY, type, stat.hp * hpScale, rand())
 }
 
 /**
