@@ -22,6 +22,8 @@ export class Input {
   readonly move: MoveVector = { x: 0, y: 0 }
   /** 이번 프레임에 새로 눌린 키 (엣지 검출) */
   private readonly pressed = new Set<string>()
+  /** 이번 프레임에 새로 눌린 포인터 (엣지). 터치 재시작 등 키보드 없는 기기의 UI 용. */
+  private pointerPressed = false
 
   private readonly onKeyDown = (e: KeyboardEvent) => {
     if (e.repeat) return
@@ -45,6 +47,7 @@ export class Input {
 
   private readonly onPointerDown = (e: PointerEvent) => {
     this.pointerActive = true
+    this.pointerPressed = true
     this.touchMode = e.pointerType === 'touch'
     this.pointerX = e.clientX
     this.pointerY = e.clientY
@@ -146,8 +149,21 @@ export class Input {
     return has
   }
 
+  /** 이번 프레임의 포인터 탭/클릭 (엣지). 터치 기기의 재시작이 이걸 쓴다. */
+  consumePointerPressed(): boolean {
+    const has = this.pointerPressed
+    this.pointerPressed = false
+    return has
+  }
+
+  /** 지금 아무 입력이든 들어오고 있는가 — 타이틀의 "아무 키나 눌러 시작"용. */
+  get anyInput(): boolean {
+    return this.pressed.size > 0 || this.pointerActive
+  }
+
   endFrame(): void {
     this.pressed.clear()
+    this.pointerPressed = false
   }
 
   isDown(key: string): boolean {

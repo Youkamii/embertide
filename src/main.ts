@@ -65,7 +65,7 @@ function renderResult(
   put(seedLabel, '#6f8299')
   root.appendChild(stats)
 
-  line('R — 다시', 'margin-top:24px;font-size:15px;color:#ffb066')
+  line('R 또는 터치 — 다시', 'margin-top:24px;font-size:15px;color:#ffb066')
 }
 
 function fatal(msg: string): void {
@@ -116,6 +116,8 @@ function boot(): void {
   if (bench > 0) game.benchSpawn(bench)
   // ?auto — 레벨업을 자동으로 골라 사람 없이 완주시킨다 (검증용)
   const autoPick = params.has('auto')
+  // ?debug — 개발자 계기판(적/탄/입자/fps). 벤치마크는 fps 를 봐야 하므로 자동 포함.
+  const debug = params.has('debug') || bench > 0
 
   // 콘솔에서 만져볼 수 있게 열어 둔다. 싱글플레이 게임이라 숨길 이유가 없고,
   // 이게 있어야 headless 검증도 되고 밸런싱도 콘솔에서 바로 실험할 수 있다.
@@ -144,6 +146,31 @@ function boot(): void {
     'text-shadow:0 0 24px rgba(255,140,40,.55);'
   ui.appendChild(center)
 
+  // 일시정지 표지
+  const pauseEl = document.createElement('div')
+  pauseEl.style.cssText =
+    'position:absolute;inset:0;display:none;place-content:center;text-align:center;' +
+    'font:800 34px/1.9 ui-monospace,monospace;color:#cfe8ff;letter-spacing:.22em;' +
+    'background:rgba(3,5,10,.45);text-shadow:0 0 30px rgba(80,160,255,.6);'
+  pauseEl.textContent = '일시정지 — P 계속'
+  ui.appendChild(pauseEl)
+
+  // 음소거 — 키보드 없는 기기를 위한 버튼 + 상태 표시 (M 과 동일)
+  const muteBtn = document.createElement('button')
+  muteBtn.style.cssText =
+    'position:absolute;top:12px;right:14px;pointer-events:auto;cursor:pointer;' +
+    'background:rgba(10,14,24,.55);color:#9fb6d4;border:1px solid rgba(120,160,220,.25);' +
+    'border-radius:6px;font:600 12px ui-monospace,monospace;padding:6px 10px;'
+  const syncMute = (): void => {
+    muteBtn.textContent = audio.muted ? '소리 꺼짐 (M)' : '소리 켬 (M)'
+  }
+  muteBtn.onclick = () => {
+    audio.setMuted(!audio.muted)
+    syncMute()
+  }
+  syncMute()
+  ui.appendChild(muteBtn)
+
   let last = performance.now()
   let acc = 0
   let frames = 0
@@ -153,6 +180,40 @@ function boot(): void {
   let records = loadRecords()
   let isBest = false
   let resultShown = false
+  // 타이틀에서 첫 입력을 기다린다 — 로드 즉시 15분 타이머가 돌면 안 된다.
+  // ?auto/?bench 는 사람이 없는 검증 모드라 바로 시작한다.
+  let started = autoPick || bench > 0
+  let paused = false
+  /** 결과 화면이 뜬 시각 — 죽는 순간의 조작이 재시작으로 새는 것을 막는 지연용 */
+  let resultAt = 0
+
+  // 창을 벗어나면 스스로 멈춘다 — 돌아왔더니 죽어 있으면 억울하다
+  window.addEventListener('blur', () => {
+    if (started && !paused && game.phase === Phase.Playing) {
+      paused = true
+      pauseEl.style.display = 'grid'
+    }
+  })
+
+  // 타이틀 — 게임 안의 유일한 조작 안내가 여기다
+  const showTitle = (): void => {
+    center.replaceChildren()
+    const line = (text: string, style: string): void => {
+      const d = document.createElement('div')
+      d.textContent = text
+      d.style.cssText = style
+      center.appendChild(d)
+    }
+    line('EMBERTIDE', 'font-size:52px;letter-spacing:.3em;color:#ffd9a8')
+    line('꺼져가는 별의 마지막 불씨 — 15분을 버틴다', 'margin-top:10px;font-size:15px;color:#a9bdd4')
+    line('이동  WASD · 방향키 · 마우스 홀드 · 터치 드래그', 'margin-top:30px;font-size:14px;color:#8fa8c4;line-height:2')
+    line('공격은 자동이다 — 움직임이 전부다', 'font-size:14px;color:#8fa8c4;line-height:2')
+    line('P 일시정지 · M 소리', 'font-size:13px;color:#6f8299;line-height:2')
+    line('아무 키 · 클릭 · 터치로 시작', 'margin-top:34px;font-size:16px;color:#ffb066')
+    center.style.background =
+      'radial-gradient(ellipse at center,rgba(4,6,12,.55),rgba(2,3,7,.82))'
+  }
+  if (!started) showTitle()
 
   function frame(now: number): void {
     const dt = Math.min((now - last) / 1000, 0.25)
@@ -168,6 +229,51 @@ function boot(): void {
     }
 
     input.update()
+
+    // 타이틀 — 첫 입력 전에는 시뮬레이션(15분 타이머 포함)이 돌지 않는다
+    if (!started) {
+      if (input.anyInput) {
+        started = true
+        center.replaceChildren()
+        center.style.background = 'none'
+        // 시작을 부른 그 입력이 아래 단축키(P 등)로 새지 않게 엣지를 비운다
+        input.endFrame()
+      } else {
+        game.visualTime += dt // 배경(성운·광륜)은 살아 있게
+        renderer.resize()
+        game.render(renderer)
+        input.endFrame()
+        requestAnimationFrame(frame)
+        return
+      }
+    }
+
+    // 일시정지 — P/Esc. 시뮬레이션이 도는 동안(Playing)에만 의미가 있다.
+    if (
+      game.phase === Phase.Playing &&
+      (input.consumePressed('p') || input.consumePressed('escape'))
+    ) {
+      paused = !paused
+      pauseEl.style.display = paused ? 'grid' : 'none'
+    }
+    if (paused && game.phase !== Phase.Playing) {
+      paused = false
+      pauseEl.style.display = 'none'
+    }
+    if (paused) {
+      game.visualTime += dt
+      renderer.resize()
+      game.render(renderer)
+      audio.intensity = 0
+      audio.updateMusic(dt)
+      if (input.consumePressed('m')) {
+        audio.setMuted(!audio.muted)
+        syncMute()
+      }
+      input.endFrame()
+      requestAnimationFrame(frame)
+      return
+    }
 
     // 레벨업: 선택지가 떠 있는 동안 시뮬레이션은 멈춘다 (game.update 가 알아서 건너뛴다)
     if (game.phase === Phase.LevelUp && game.pendingChoices.length > 0) {
@@ -187,11 +293,15 @@ function boot(): void {
       // 결과는 판이 끝난 순간 딱 한 번 확정한다 (매 프레임 저장하면 기록이 뻥튀기된다)
       if (!result) {
         result = makeResult(game, seedLabel)
+        resultAt = game.visualTime
         const saved = saveRecord(result)
         records = saved.records
         isBest = saved.isBest
       }
-      if (input.consumePressed('r')) {
+      // 터치 기기도 다시 시작할 수 있어야 한다 — R 는 키보드 전용이었다.
+      // 0.5s 지연: 죽는 순간까지 누르던 조작이 그대로 재시작으로 새면 결과를 못 본다.
+      const tapRestart = game.visualTime - resultAt > 0.5 && input.consumePointerPressed()
+      if (input.consumePressed('r') || tapRestart) {
         levelUp.hide()
         result = null
         isBest = false
@@ -200,7 +310,10 @@ function boot(): void {
       }
     }
 
-    if (input.consumePressed('m')) audio.setMuted(!audio.muted)
+    if (input.consumePressed('m')) {
+      audio.setMuted(!audio.muted)
+      syncMute()
+    }
 
     renderer.resize()
     game.update(input, dt)
@@ -227,16 +340,19 @@ function boot(): void {
     const bossHp = game.boss.idx >= 0 && game.boss.maxHp > 0
       ? Math.max(0, Math.round((game.foes.hp[game.boss.idx]! / game.boss.maxHp) * 100))
       : -1
+    // 개발자 계기판(적/탄/입자/fps)은 ?debug·?bench 에서만 — 평소 HUD 에 섞이면
+    // 게임이 기술 데모처럼 보인다. 목숨과 무관한 숫자는 특권이 없다.
     hud.textContent =
       `${game.act + 1}막 ${act.name}\n` +
       `${fmtTime(RUN_SECONDS - game.elapsed)}  남음\n` +
       `HP ${hpPct}%   Lv ${p.level}\n` +
       `처치 ${p.kills.toLocaleString()}\n` +
       `${gear}\n` +
-      (bossHp >= 0 ? `\n◆ 보스 ${bossHp}%\n` : '\n') +
-      `\n` +
-      `적 ${game.foes.count.toLocaleString()}  탄 ${game.shots.count}  입자 ${game.motes.count.toLocaleString()}\n` +
-      `fps ${fps.toFixed(0)}`
+      (bossHp >= 0 ? `\n◆ 보스 ${bossHp}%` : '') +
+      (debug
+        ? `\n\n적 ${game.foes.count.toLocaleString()}  탄 ${game.shots.count}` +
+          `  입자 ${game.motes.count.toLocaleString()}\nfps ${fps.toFixed(0)}`
+        : '')
 
     // 막 전환 — 화면 가운데에 잠깐. 15분이 5분×3이 아니라 하나의 곡선이 되려면
     // "여기까지 왔다"는 이정표가 있어야 한다.
