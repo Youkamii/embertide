@@ -184,7 +184,9 @@ function boot(): void {
   const ALT_H = 240
   const altim = document.createElement('div')
   altim.style.cssText =
-    'position:absolute;left:18px;top:50%;transform:translateY(-50%);width:10px;' +
+    // display:none 으로 태어난다 — 켜는 건 시작 후 rAF 뿐이라, 안 그러면 타이틀
+    // 화면에 미설정 껍데기가 뜬다 (적대 리뷰가 잡았다)
+    'display:none;position:absolute;left:18px;top:50%;transform:translateY(-50%);width:10px;' +
     `height:${ALT_H}px;pointer-events:none;background:rgba(8,12,22,.55);` +
     'border:1px solid rgba(120,160,220,.22);border-radius:5px;'
   const altBand = document.createElement('div')
@@ -418,9 +420,9 @@ function boot(): void {
       const bBot = scaleY(hr * DISK_IN)
       altBand.style.top = `${bTop}px`
       altBand.style.height = `${Math.max(3, bBot - bTop)}px`
-      const bar = Math.floor(game.beatClock / 4)
-      altFeed.textContent = game.feeding() ? '포식!' : bar >= 16 ? `${7 - (bar % 8)}` : '—'
-      altFeed.style.color = game.feeding() || game.feedWarn() ? '#ff5a46' : '#ff9d6a'
+      const bars = game.barsUntilFeed()
+      altFeed.textContent = bars === 0 ? '포식!' : bars > 0 ? String(bars) : '—'
+      altFeed.style.color = bars === 0 || game.feedWarn() ? '#ff5a46' : '#ff9d6a'
       altim.style.display = started && !result ? 'block' : 'none'
     }
 

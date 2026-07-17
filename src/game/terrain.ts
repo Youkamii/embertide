@@ -249,16 +249,49 @@ export class Terrain {
         this.tint[i] = rng.next()
         // 잔해는 **두꺼운 곳**에 묻힌다. 겉껍질에 있으면 파는 맛도 위험도 없다.
         // 시드가 정하므로 같은 시드면 같은 자리 — 데일리에서 "저기 있다"가 성립한다.
-        // 원반 대역은 확률 2배 — 위험한 강에 부가 있어야 강하가 결정이 된다.
-        // (rng.next() 호출 수는 불변 — 확률값만 바꿔 스트림을 안 흔든다)
+        // 원반 대역은 기준 완화(n>=6) + 확률 상향 — 대역은 임계 0.75 와 오토마타가
+        // 통짜 덩어리를 죽여 n>=8 후보 자체가 붕괴하므로, 확률 2배(0.11)로는
+        // 잔해 밀도가 외곽의 절반 이하였고 시드에 따라 0이었다(실측 5시드).
+        // "위험한 강에 부가 있다"가 실재하려면 기준부터 대역의 지형에 맞춰야 한다.
         let cacheP = 0.055
+        let thick = 8
         if (diskOutR > 0) {
           const wx = this.originX + cx * CELL + CELL * 0.5
           const wy = this.originY + cy * CELL + CELL * 0.5
           const d = Math.hypot(wx, wy)
-          if (d > diskInR && d < diskOutR) cacheP = 0.11
+          if (d > diskInR && d < diskOutR) {
+            cacheP = 0.16
+            thick = 6
+          }
         }
-        if (n >= 8 && rng.next() < cacheP) this.cache[i] = 1
+        if (n >= thick && rng.next() < cacheP) this.cache[i] = 1
+      }
+    }
+
+    // 대역 보장 배치 — 확률만으론 안 된다: 노이즈가 대역 지형을 전멸시키는 시드가
+    // 실재한다(실측 seed 1337: 대역 잔해 0). 조류의 강에 **보물 소행성**(3×3 바위 +
+    // 중심 잔해)을 결정적으로 띄운다 — 막당 두 개꼴, 강하의 랜드마크.
+    if (diskOutR > diskInR) {
+      for (let k = 0; k < 10; k++) {
+        const a = rng.next() * Math.PI * 2
+        const d = diskInR + 60 + rng.next() * (diskOutR - diskInR - 120)
+        const wx = Math.cos(a) * d
+        const wy = Math.sin(a) * d
+        // 시작점 클리어를 침범하면 개막 요새/기습이 된다 — 비켜 놓는다
+        if (Math.hypot(wx - startX, wy - startY) < (clearR + 2) * CELL) continue
+        const acx = this.cellX(wx)
+        const acy = this.cellY(wy)
+        for (let oy = -1; oy <= 1; oy++) {
+          for (let ox = -1; ox <= 1; ox++) {
+            if (!this.inBounds(acx + ox, acy + oy)) continue
+            const ai = (acy + oy) * cols + acx + ox
+            const h = 62 + rng.next() * 30
+            this.hp[ai] = h
+            this.maxHp[ai] = h
+            this.tint[ai] = rng.next()
+          }
+        }
+        if (this.inBounds(acx, acy)) this.cache[acy * cols + acx] = 1
       }
     }
   }

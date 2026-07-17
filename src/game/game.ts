@@ -271,6 +271,18 @@ export class Game implements FireCtx {
   }
 
   /**
+   * 포식까지 남은 마디 수. 포식 중 0, 첫 포식 게이트(bar 16) 전엔 -1.
+   * 고도계가 이걸 표시한다 — 시간표를 UI 에 복붙하면 주기를 바꿀 때
+   * 계기판이 틀린 박자를 가르치게 된다 (적대 리뷰가 잡았다).
+   */
+  barsUntilFeed(): number {
+    if (this.feeding()) return 0
+    const bar = Math.floor(this.beatClock / 4)
+    if (bar < 16) return -1
+    return 7 - (bar % 8)
+  }
+
+  /**
    * 이번 스텝의 중력 배율 — 심장박동이 곧 중력이다.
    * 마디 첫 박(0.5박)마다 "쿵" 하고 조이고(2.6배), 포식 마디는 3.8배.
    * 여기 하나로 플레이어·적·드랍이 함께 숨쉰다.
@@ -309,20 +321,37 @@ export class Game implements FireCtx {
   /**
    * 파편 광맥 — 원반 대역에 XP 무리가 응결된다 (판의 "저기 캐러 가자").
    * 총량은 잔해와 같은 원칙: 그 시점 한 레벨의 22%를 10개로 나눠 담는다.
+   *
+   * 케이던스의 진실(적대 리뷰가 계산): 21~30초 주사위는 첫 광맥(50초)과 포식 게이트
+   * 전의 백업일 뿐, 2막부터는 포식 주기(8마디 = 19~14초)가 항상 먼저 와 재보급
+   * (tickHeartbeat 의 +1.5s)이 케이던스를 지배한다 — 즉 광맥은 심장박동에 종속된
+   * 경제고, 그게 "포식 전에 캐고 나온다" 사이클의 의도다.
    */
   private tickShards(): void {
     if (this.elapsed < this.nextShardAt) return
     this.nextShardAt = this.elapsed + 21 + this.rng.next() * 9
     const hr = this.holeR()
     const a = this.rng.next() * Math.PI * 2
-    const r = hr * (DISK_IN + 0.3 + this.rng.next() * (DISK_OUT - DISK_IN - 0.6))
+    // 하한 1.65hr: 산포(-64px)를 감안해도 낙하물이 대역 밑(죽음의 나선 구역)으로
+    // 새지 않는 최소치다 — 1.5hr 로 뒀더니 1막에서 응결 일부가 태어나자마자
+    // 지평선으로 흘러 증발했다(적대 리뷰가 산술로 잡았다).
+    const r = hr * (1.65 + this.rng.next() * (DISK_OUT - 2.05))
     const cx = Math.cos(a) * r
     const cy = Math.sin(a) * r
     const value = (xpForLevel(this.player.level) * 0.22) / 10
     for (let k = 0; k < 10; k++) {
       const sa = this.rng.next() * Math.PI * 2
       const sd = this.rng.next() * 64
-      this.drops.spawn(cx + Math.cos(sa) * sd, cy + Math.sin(sa) * sd, 0, 0, value, Drop.Xp)
+      if (this.drops.spawn(cx + Math.cos(sa) * sd, cy + Math.sin(sa) * sd, 0, 0, value, Drop.Xp) < 0) {
+        // 풀 만석이면 직접 준다 — 잔해·보스와 같은 규칙. 광맥만 조용히 증발하면
+        // "캐러 갈 이유"가 후반 난전에서만 사라지는 비대칭이 된다.
+        this.pendingLevels += this.player.gainXp(value * this.pactXp)
+      }
+    }
+    if (this.pendingLevels > 0 && this.phase === Phase.Playing) {
+      this.phase = Phase.LevelUp
+      this.loadout.recomputeStats(this.player)
+      this.pendingChoices = this.loadout.roll(this.rng, 3, this.player.stats.awaken)
     }
     // 응결의 섬광 — 멀리서도 "저기 맺혔다"가 보여야 강하가 결정이 된다
     shockwave(this.motes, cx, cy, 200, 1.5, 1.2, 0.4, 0.9)
@@ -375,11 +404,14 @@ export class Game implements FireCtx {
     this.echoSlot = null
     // 지형은 시드에서 나온다. 같은 시드 = 같은 맵.
     // 중심은 블랙홀 몫으로 비운다 — 5막 지평선(370) + 여유. 시작점은 궤도 위.
-    // 원반 대역(1막 안쪽 경계 ~ 5막 바깥 경계)은 조류의 강 — 벽 희박, 잔해 2배.
+    // 원반 대역 지형 규칙(벽 희박·잔해 2배)의 하한은 홀 클리어와 같다 — 그 안은
+    // 애초에 지형이 없으니 더 낮은 하한은 죽은 값이다(적대 리뷰). 결과적으로
+    // 이 규칙은 지형이 실존하는 3~5막 대역에서 실재한다.
     const holeMax = HOLE_BASE_R + HOLE_GROW * (ACTS.length - 1)
+    const holeClear = holeMax + 210
     this.terrain.generate(
-      seed, WORLD_R, 0, START_DIST, holeMax + 210,
-      HOLE_BASE_R * DISK_IN, holeMax * DISK_OUT,
+      seed, WORLD_R, 0, START_DIST, holeClear,
+      holeClear, holeMax * DISK_OUT,
     )
     this.player.x = 0
     this.player.y = START_DIST
@@ -672,9 +704,10 @@ export class Game implements FireCtx {
       // 플레이어가 원반 대역 안이면 링을 좁힌다(520~800) — 조류가 추적을 나선으로
       // 휘게 해 도달이 늦고(실측: 대역의 봇이 40초간 킬 7), fold 도 잦다.
       // 강물에서 싸우기로 했으면 강물 위아래에서 빨리 밀려와야 그게 성립한다.
-      // 첫 45초는 제외 — 무기 1개 시절의 근접 스폰은 압박이 아니라 처형이다.
+      // 첫 75초는 제외 — 무기 1~2개 시절의 근접 스폰은 압박이 아니라 처형이다
+      // (45로 뒀더니 봇이 1막 83초에 죽었다 — 초반 사망 0 이 위다).
       const pBand = diskBandAt(Math.hypot(this.player.x, this.player.y), this.holeR())
-      const tight = pBand > 0.25 && this.elapsed > 45
+      const tight = pBand > 0.25 && this.elapsed > 75
       const rMin = tight ? 520 : 620
       const rMax = tight ? 800 : 900
       if (type === Foe.Mote) {
@@ -1608,14 +1641,18 @@ export class Game implements FireCtx {
         }
         const ramp = 0.3 + this.act * 0.175
         const g = ((HOLE_PULL_DROP * hr * ramp) / hd) * surge * dt
-        // 접선 성분이 나선을 만든다 — 직선 낙하는 블랙홀처럼 안 보인다
-        drops.vx[i]! += (-hx / hd) * g * 0.8 + (-hy / hd) * g * 0.55
-        drops.vy[i]! += (-hy / hd) * g * 0.8 + (hx / hd) * g * 0.55
+        // 접선 성분이 나선을 만든다 — 직선 낙하는 블랙홀처럼 안 보인다.
+        // 대역 안에서는 (1-dband)로 죽인다 — 조류(아래)가 접선의 주인이어야
+        // "보이는 흐름(스트림라인)이 곧 물리"가 성립한다 (적대 리뷰: 두 접선이
+        // 몰래 중첩되면 XP 가 유속보다 빨리 돌아 화면과 물리가 어긋난다).
+        const dband = diskBandAt(hd, hr)
+        const spiral = g * 0.55 * (1 - dband)
+        drops.vx[i]! += (-hx / hd) * g * 0.8 + (-hy / hd) * spiral
+        drops.vy[i]! += (-hy / hd) * g * 0.8 + (hx / hd) * spiral
         // 원반 대역 안에서는 조류가 지배한다 — XP 가 강물처럼 궤도를 돈다.
-        // drag(3.4)를 보상한 가속이라 종단 속도가 조류 유속과 같아진다.
+        // drag(3.4)를 보상한 가속이라 종단 속도가 조류 유속에 수렴한다.
         // 막 램프(중력과 동일): 1막 0.3배 — 풀 유속이면 초반의 드문 드랍이 자석 밖으로
         // 도주해 첫 수업이 굶는다(실측: 킬 7에 xp 1.6 정체, 첫 레벨업 42초).
-        const dband = diskBandAt(hd, hr)
         if (dband > 0) {
           const df = FLOW_MAX * dband * ramp * 3.4 * dt
           drops.vx[i]! += (-hy / hd) * df
@@ -1775,7 +1812,10 @@ export class Game implements FireCtx {
     renderer.cosmos.intensity = Math.min(1, this.elapsed / RUN_SECONDS + this.act * 0.05)
     // 블랙홀은 배경 패스(cosmos)가 그린다 — 무블렌드 쓰기라 어둡게 할 수 있는
     // 유일한 층이고, 렌즈 왜곡·원반·광자 고리까지 셰이더 한 방이다.
+    // 대역 경계도 매 프레임 주입 — 배경의 원반이 곧 게임의 원반 (acts 가 단일 진실).
     renderer.cosmos.holeR = this.holeR()
+    renderer.cosmos.diskIn = this.holeR() * DISK_IN
+    renderer.cosmos.diskOut = this.holeR() * DISK_OUT
     // 심장박동을 광자 고리·원반에 싣는다. 박마다 얕게, 마디 첫 박에 깊게 —
     // 화면이 소리 없이도 박자를 가르친다 (무기 발사가 이 박자에 물려 있다).
     const beatEnv = Math.exp(-(this.beatClock % 1) * 4.5)

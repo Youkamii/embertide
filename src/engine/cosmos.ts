@@ -32,6 +32,8 @@ uniform float u_intensity; // 0..1 — 후반일수록 성운이 타오른다
 uniform float u_hole;    // 사건의 지평선 반지름 (월드 px). 0 = 블랙홀 없음
 uniform float u_beat;    // 0..1 심장박동 엔벨로프 — 광자 고리·원반이 뛴다
 uniform float u_feed;    // 0..1 포식 강도 — 원반이 타오른다
+uniform float u_diskIn;  // 원반 대역 안쪽 반지름 (월드 px) — acts.DISK_IN 이 단일 진실
+uniform float u_diskOut; // 원반 대역 바깥 반지름 — 배경의 원반이 곧 게임의 원반이어야 한다
 
 float hash21(vec2 p) {
   p = fract(p * vec2(233.34, 851.73));
@@ -120,10 +122,12 @@ void main() {
   float holes = smoothstep(0.28, 0.62, n2);
   float neb = density * (0.35 + holes * 0.65);
   vec3 nebCol = mix(u_tintA, u_tintB, clamp(n2 * 1.3, 0.0, 1.0));
-  // 구역 팔레트 — 원반(지평선 3.2배) 밖은 불모의 진공. 성운의 채도를 죽여
-  // "가치의 지리"를 색으로 말한다: 색이 있는 곳에 부가 있다.
+  // 구역 팔레트 — 원반 밖은 불모의 진공. 성운의 채도를 죽여 "가치의 지리"를
+  // 색으로 말한다: 색이 있는 곳에 부가 있다. 경계는 유니폼(acts 데이터)이 정한다.
   if (hr > 1.0) {
-    float barren = smoothstep(hr * 3.2, hr * 4.8, wr);
+    // 1.25배까지 짧게 — 완만(1.5배)하면 헐값 구역(4hr)이 아직 유채색이라
+    // "색을 믿고 남은" 플레이어가 가난한 데서 사냥한다 (적대 리뷰).
+    float barren = smoothstep(u_diskOut, u_diskOut * 1.25, wr);
     vec3 nebGray = vec3(dot(nebCol, vec3(0.299, 0.587, 0.114)));
     nebCol = mix(nebCol, nebGray * 0.5, barren * 0.78);
   }
@@ -147,9 +151,9 @@ void main() {
   col += nebCol * 0.02 * pow(clamp(1.0 - r * 0.6, 0.0, 1.0), 3.0);
 
   if (hr > 1.0) {
-    // ── 강착원반: **플레이 대역(1.2~3.2배)과 정렬** — 배경의 원반이 곧 게임의
-    // 원반이어야 "저 강물 안이 부자 동네"가 화면에서 읽힌다.
-    float diskT = (wr - hr * 1.2) / (hr * 2.0);
+    // ── 강착원반: **플레이 대역과 정렬** — 배경의 원반이 곧 게임의 원반이어야
+    // "저 강물 안이 부자 동네"가 화면에서 읽힌다. 경계는 유니폼(acts 데이터)이 정한다.
+    float diskT = (wr - u_diskIn) / max(1.0, u_diskOut - u_diskIn);
     if (diskT < 1.15 && wr > hr * 0.5) {
       float ang = atan(world.y, world.x);
       float dT = max(diskT, 0.0);
@@ -191,6 +195,9 @@ export class Cosmos {
   beat = 0
   /** 0..1 포식 강도 — 원반이 타오르고 고리가 조인다 */
   feed = 0
+  /** 원반 대역 경계(월드 px) — acts.DISK_IN/OUT × 지평선. 게임이 매 프레임 넣는다 */
+  diskIn = 0
+  diskOut = 0
 
   constructor(gl: GL) {
     this.gl = gl
@@ -213,6 +220,8 @@ export class Cosmos {
     gl.uniform1f(this.prog.uniforms['u_hole']!, this.holeR)
     gl.uniform1f(this.prog.uniforms['u_beat']!, this.beat)
     gl.uniform1f(this.prog.uniforms['u_feed']!, this.feed)
+    gl.uniform1f(this.prog.uniforms['u_diskIn']!, this.diskIn)
+    gl.uniform1f(this.prog.uniforms['u_diskOut']!, this.diskOut)
     gl.bindVertexArray(this.tri)
     gl.drawArrays(gl.TRIANGLES, 0, 3)
     gl.bindVertexArray(null)

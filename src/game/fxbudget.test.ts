@@ -131,48 +131,61 @@ function refill(g: Game, rng: Rng, want: number): void {
   }
 }
 
-describe('이펙트 광량 예산', () => {
-  it('최악의 합법 빌드에서도 화면 중심이 타지 않는다', () => {
-    const g = worstCase()
-    const renderer = new FakeRenderer()
-    const spawnRng = new Rng(99)
-    const input = { move: { x: 0, y: 0 } } as unknown as Input
+/** 시나리오 하나를 측정한다. 위치가 곧 시나리오다 — 외곽 vs 강착원반 대역. */
+function measure(px: number, py: number): { p50: number; p95: number; calmMin: number } {
+  const g = worstCase()
+  g.player.x = px
+  g.player.y = py
+  const renderer = new FakeRenderer()
+  const spawnRng = new Rng(99)
+  const input = { move: { x: 0, y: 0 } } as unknown as Input
 
-    const lums: number[] = []
-    const calms: number[] = []
-    refill(g, spawnRng, 2600)
+  const lums: number[] = []
+  const calms: number[] = []
+  refill(g, spawnRng, 2600)
 
-    const steps = 12 * 60
-    for (let s = 0; s < steps; s++) {
-      if (g.phase === Phase.LevelUp) {
-        g.choose(g.pendingChoices[0]!)
-        continue
-      }
-      if (g.phase !== Phase.Playing) break
-      g.player.hp = g.player.stats.maxHp // 관찰자 불사 — 재는 건 생존이 아니라 광량이다
-      g.update(input, 1 / 60)
-      if (s % 60 === 0) refill(g, spawnRng, 2600)
-      if (s % 2 === 0) {
-        g.render(renderer as unknown as Renderer)
-        lums.push(centerLum(renderer.batch.quads, g.player.x, g.player.y))
-        calms.push(renderer.calm)
-      }
+  const steps = 12 * 60
+  for (let s = 0; s < steps; s++) {
+    if (g.phase === Phase.LevelUp) {
+      g.choose(g.pendingChoices[0]!)
+      continue
     }
+    if (g.phase !== Phase.Playing) break
+    g.player.hp = g.player.stats.maxHp // 관찰자 불사 — 재는 건 생존이 아니라 광량이다
+    g.update(input, 1 / 60)
+    if (s % 60 === 0) refill(g, spawnRng, 2600)
+    if (s % 2 === 0) {
+      g.render(renderer as unknown as Renderer)
+      lums.push(centerLum(renderer.batch.quads, g.player.x, g.player.y))
+      calms.push(renderer.calm)
+    }
+  }
 
-    lums.sort((a, b) => a - b)
-    const p50 = lums[Math.floor(lums.length * 0.5)]!
-    const p95 = lums[Math.floor(lums.length * 0.95)]!
-    const max = lums[lums.length - 1]!
-    // 기록용 — 수치가 곧 증거다
-    console.log(
-      `[fxbudget] 중심 광량 p50=${p50.toFixed(2)} p95=${p95.toFixed(2)} max=${max.toFixed(2)}` +
-      ` calm(min)=${Math.min(...calms).toFixed(2)} 표본=${lums.length}`,
-    )
+  lums.sort((a, b) => a - b)
+  return {
+    p50: lums[Math.floor(lums.length * 0.5)]!,
+    p95: lums[Math.floor(lums.length * 0.95)]!,
+    calmMin: Math.min(...calms),
+  }
+}
 
+describe('이펙트 광량 예산', () => {
+  it('최악의 합법 빌드에서도 화면 중심이 타지 않는다 (외곽)', () => {
+    const m = measure(0, 1050)
+    console.log(`[fxbudget/외곽] p50=${m.p50.toFixed(2)} p95=${m.p95.toFixed(2)} calm=${m.calmMin.toFixed(2)}`)
     // 상한: 이 위로는 플레이어(2.0)·적(0.78)이 이펙트에 묻히기 시작한다.
     // fx 파티클은 Math.random 이라 판마다 조금 다르다 — p95 로 재고 여유를 둔다.
-    expect(p95, '중심 광량 p95 — 화이트아웃 상한').toBeLessThanOrEqual(1.0)
+    expect(m.p95, '중심 광량 p95 — 화이트아웃 상한').toBeLessThanOrEqual(1.0)
     // 하한: 감광이 이펙트를 아예 지워버려도 실패다 — "화려하되 타지 않는다"가 목표다.
-    expect(p50, '중심 광량 p50 — 이펙트 실종 하한').toBeGreaterThanOrEqual(0.08)
+    expect(m.p50, '중심 광량 p50 — 이펙트 실종 하한').toBeGreaterThanOrEqual(0.08)
+  })
+
+  it('강착원반 대역 안에서도 타지 않는다 — 스트림라인·조류·밀집 스폰 포함', () => {
+    // 개편 후 주 전장은 대역이다 — 외곽만 재면 자물쇠에 사각이 생긴다 (적대 리뷰).
+    const g0 = worstCase()
+    const m = measure(0, g0.holeR() * 2.2)
+    console.log(`[fxbudget/대역] p50=${m.p50.toFixed(2)} p95=${m.p95.toFixed(2)} calm=${m.calmMin.toFixed(2)}`)
+    expect(m.p95, '대역 중심 광량 p95').toBeLessThanOrEqual(1.0)
+    expect(m.p50, '대역 중심 광량 p50').toBeGreaterThanOrEqual(0.08)
   })
 })
