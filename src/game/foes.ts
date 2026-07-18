@@ -278,6 +278,24 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
       desiredY += sepY * sepScale
     }
 
+    // ── 압사 — 몰아붙여진 밀집은 서로를 으깬다 (블라인드 발상 "밀도 압사"의 이식).
+    // 조건 둘: 이웃 8+ **그리고** 넉백 압력이 실려 있을 것. 압력 조건이 없으면
+    // 자연 밀집(스폰 뭉침)까지 죽어 세계가 스스로 무너진다. 으깬 보상(XP)은
+    // killFoe 가 정상 지급한다 — "병목·벽으로 밀어 으깨기"가 새 전술 축이 된다.
+    // (8/90/11 로 뒀더니 피격 반동만으로도 상시 발동해 봇 완주 5/6 — 공짜 청소가
+    //  됐다. 9/120/10 은 의도적 몰아넣기(붕괴·벽 구석)에서만 값을 낸다.)
+    if (sepCount >= 9 && i !== bossIdx) {
+      const pm = Math.abs(foes.pushX[i]!) + Math.abs(foes.pushY[i]!)
+      if (pm > 120) {
+        foes.hp[i]! -= (sepCount - 7) * 10 * dt
+        if (foes.hp[i]! <= 0) {
+          foes.hp[i] = 0
+          if (deadCount < deadOut.length) deadOut[deadCount++] = i
+          continue
+        }
+      }
+    }
+
     // ── 속도: 목표로 부드럽게 (즉시 반영하면 분리가 튀어 떨림이 생긴다)
     const blend = 1 - Math.exp(-9 * dt)
     let vx = vxs[i]! + (desiredX - vxs[i]!) * blend

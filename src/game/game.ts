@@ -643,6 +643,7 @@ export class Game implements FireCtx {
     this.updateFields(dt)
     this.updateShots(dt)
     this.updateDrops(dt)
+    this.digestTail(dt)
     updateMotes(this.motes, dt)
     this.spawn(dt)
     this.tickBeats(dt)
@@ -1703,7 +1704,9 @@ export class Game implements FireCtx {
       if (d2 < pickup2) {
         const type = drops.type[i]!
         if (type === Drop.Xp) {
-          leveled += p.gainXp(drops.value[i]! * this.pactXp)
+          // 즉시 흡수가 아니다 — 전리품 꼬리에 매달리고, 소화(digestTail)돼야 내 것.
+          // 피격당하면 미소화분을 흘린다. 수집이 확정 수입에서 도박이 된다.
+          p.tailXp += drops.value[i]!
           this.sfx('pickup')
         } else if (type === Drop.Heal) {
           p.heal(drops.value[i]!)
@@ -1731,6 +1734,40 @@ export class Game implements FireCtx {
       shockwave(this.motes, p.x, p.y, 70, 1.6, 1.35, 0.5, 0.5)
       burst(this.motes, p.x, p.y, 10, 1.6, 1.3, 0.45, 300, 0.6, 5, Shape.Star)
       // 셰이크 없음 — 레벨업은 분당 여러 번이다 (루틴)
+      this.sfx('levelup')
+    }
+  }
+
+  /**
+   * 전리품 꼬리 소화 + 유실 산포.
+   * 소화율은 레벨 비례 — 요구 XP 곡선(지수)을 소화가 병목으로 만들면 안 되므로
+   * 같이 자란다. 유실 드랍은 사방으로 튕겨 잠시 무방비로 구른다 — 다시 주울 수
+   * 있지만 그 동선 자체가 위험이다 (잃는 순간에도 결정이 이어진다).
+   */
+  private digestTail(dt: number): void {
+    const p = this.player
+    if (p.tailSpill > 0.5) {
+      const n = Math.min(6, Math.max(2, Math.round(p.tailSpill / 8)))
+      const each = p.tailSpill / n
+      for (let k = 0; k < n; k++) {
+        const a = this.rng.next() * Math.PI * 2
+        const sp = 160 + this.rng.next() * 200
+        this.drops.spawn(p.x, p.y, Math.cos(a) * sp, Math.sin(a) * sp, each, Drop.Xp)
+      }
+      burst(this.motes, p.x, p.y, 6, DROP_BASE * 0.5, DROP_BASE * 2, DROP_BASE * 2.4, 260, 0.5, 5)
+      p.tailSpill = 0
+    }
+    if (p.tailXp <= 0) return
+    const rate = 8 + p.level * 1.2
+    const chunk = Math.min(p.tailXp, rate * dt)
+    p.tailXp -= chunk
+    const leveled = p.gainXp(chunk * this.pactXp)
+    if (leveled > 0 && this.phase === Phase.Playing) {
+      this.pendingLevels += leveled
+      this.phase = Phase.LevelUp
+      this.loadout.recomputeStats(p)
+      this.pendingChoices = this.loadout.roll(this.rng, 3, p.stats.awaken)
+      shockwave(this.motes, p.x, p.y, 70, 1.6, 1.35, 0.5, 0.5)
       this.sfx('levelup')
     }
   }
@@ -2111,6 +2148,20 @@ export class Game implements FireCtx {
       // 광륜(느린 회전) + 씨앗 코어(빠른 역회전) + 십자 섬광. 셋 다 다른 속도로 돌아서
       // 정적인 적 무리 속에서 유일하게 "살아 있는" 것으로 읽힌다.
       // 유사 3D: 이동 중 살짝 떠오르고(hop), 그림자는 지면에 남는다 — 접지감의 핵심
+      // 전리품 꼬리 — 미소화 XP 가 이동 궤적을 따라 구슬로 꿰인다.
+      // "지금 얼마를 걸고 있는가"가 몸에 보여야 수집이 도박으로 읽힌다.
+      const beads = Math.min(20, Math.round(Math.sqrt(p.tailXp) * 0.9))
+      for (let k = 1; k <= beads; k++) {
+        const idx = (p.trailHead - k * 2 + p.trailX.length * 4) % p.trailX.length
+        const bx = p.trailX[idx]!
+        const by = p.trailY[idx]!
+        if (bx === 0 && by === 0) break // 아직 안 채워진 이력 (시작점은 궤도 위라 0,0 이 아님)
+        const fade = 1 - (k / beads) * 0.6
+        b.push(
+          bx, by, 6.5, t * 2 + k,
+          DROP_BASE * 0.3 * fade, DROP_BASE * 1.2 * fade, DROP_BASE * 1.5 * fade, 1, Shape.Orb,
+        )
+      }
       const hop = Math.abs(p.vx) + Math.abs(p.vy) > 20 ? Math.abs(Math.sin(t * 11)) * 3 : 0
       renderer.shadows.push(p.x, p.y - 13, 30, 0, 0, 0, 0.05, 0.5, Shape.Orb)
       const py = p.y + hop

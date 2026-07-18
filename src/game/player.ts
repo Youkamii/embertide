@@ -180,6 +180,20 @@ export class Player {
   kills = 0
   damageDealt = 0
   damageTaken = 0
+  /**
+   * 전리품 꼬리 — 미소화 XP (블라인드 발상 "인벤토리를 히트박스로"의 이식).
+   * 주운 XP 는 즉시 내 것이 아니다: 여기 매달려 초당 소화율만큼만 흡수된다.
+   * 피격당하면 미소화분 40%를 흘린다(hurt 가 tailSpill 에 기록, game 이 산포).
+   * 대수확 직후가 가장 부자이자 가장 취약 — 수집이 도박이 된다.
+   */
+  tailXp = 0
+  /** 이번 피격으로 흘린 미소화 XP — game 이 소비하고 0 으로 되돌린다 */
+  tailSpill = 0
+  /** 꼬리 렌더용 위치 이력 링버퍼 (연출 전용 — 판정에 안 쓴다) */
+  readonly trailX = new Float32Array(48)
+  readonly trailY = new Float32Array(48)
+  trailHead = 0
+  private trailTick = 0
 
   reset(): void {
     this.x = 0
@@ -199,6 +213,12 @@ export class Player {
     this.kills = 0
     this.damageDealt = 0
     this.damageTaken = 0
+    this.tailXp = 0
+    this.tailSpill = 0
+    this.trailX.fill(0)
+    this.trailY.fill(0)
+    this.trailHead = 0
+    this.trailTick = 0
   }
 
   update(move: MoveVector, dt: number, worldR: number): void {
@@ -231,6 +251,13 @@ export class Player {
     // 아주 빠르게 뺀다. 적에 둘러싸이면 피격이 매번 리셋돼서 상시 켜지고,
     // 그러면 "피격 표시"가 아니라 그냥 빨간 필터다.
     if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - dt * 9)
+    // 꼬리 이력 — 4스텝(67ms)마다 한 칸. 렌더가 이걸 따라 미소화 구슬을 꿴다.
+    if (++this.trailTick >= 4) {
+      this.trailTick = 0
+      this.trailHead = (this.trailHead + 1) % this.trailX.length
+      this.trailX[this.trailHead] = this.x
+      this.trailY[this.trailHead] = this.y
+    }
     if (s.regen > 0 && this.hp < s.maxHp) {
       this.hp = Math.min(s.maxHp, this.hp + s.regen * dt)
     }
@@ -244,6 +271,12 @@ export class Player {
     this.invuln = this.stats.iframe
     // 누적하지 않고 최대치를 낮게 잡는다 — 연속 피격이 곧 상시 점등이었다
     this.hurtFlash = 0.6
+    // 전리품 꼬리 유실 — 미소화분 40%가 쏟아진다. 산포는 game 의 몫(드랍 풀).
+    if (this.tailXp > 0.5) {
+      const spill = this.tailXp * 0.4
+      this.tailXp -= spill
+      this.tailSpill += spill
+    }
     if (this.hp <= 0) {
       this.hp = 0
       this.alive = false
