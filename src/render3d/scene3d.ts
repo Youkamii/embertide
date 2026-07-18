@@ -101,6 +101,8 @@ function diskTexture(): THREE.Texture {
 export class Scene3D {
   readonly renderer: THREE.WebGLRenderer
   readonly scene: THREE.Scene
+  /** 기준 도구(축·황도 그리드) — 렌즈 뒤에 그린다: 잣대가 중력에 휘면 잣대가 아니다 */
+  readonly overlay: THREE.Scene
   readonly camera: THREE.PerspectiveCamera
   private readonly composer: EffectComposer
   private readonly lensPass: ShaderPass
@@ -135,6 +137,7 @@ export class Scene3D {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
     this.scene = new THREE.Scene()
+    this.overlay = new THREE.Scene()
     this.scene.background = new THREE.Color(0x030510)
     this.scene.fog = new THREE.FogExp2(0x05070f, 0.00004)
     this.camera = new THREE.PerspectiveCamera(58, 1.77, 1, 400000)
@@ -206,14 +209,14 @@ export class Scene3D {
     em.transparent = true
     em.opacity = 0.22
     em.depthWrite = false
-    this.scene.add(this.ecliptic)
+    this.overlay.add(this.ecliptic)
 
     this.axes = new THREE.AxesHelper(1)
     const am = this.axes.material as THREE.Material
     am.transparent = true
     am.opacity = 0.75
     am.depthWrite = false
-    this.scene.add(this.axes)
+    this.overlay.add(this.axes)
 
     // 별밭 — 결정론 씨앗의 원거리 배경 (카메라를 따라다닌다: 시차 없는 무한 원경)
     const starN = 3200
@@ -495,5 +498,10 @@ export class Scene3D {
 
   render(): void {
     this.composer.render()
+    // 기준 도구는 렌즈·블룸의 영향 밖에서 그린다
+    this.renderer.autoClear = false
+    this.renderer.clearDepth()
+    this.renderer.render(this.overlay, this.camera)
+    this.renderer.autoClear = true
   }
 }
