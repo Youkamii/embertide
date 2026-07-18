@@ -85,7 +85,10 @@ export function bhRadius(vol: number): number {
  * R90에서 몸 12.6(영향권의 1/7), R1500에서 41(1/36).
  */
 export function bodyRof(radius: number): number {
-  return Math.min(radius, 1.9 * Math.pow(radius, 0.42))
+  // 0.4·√R — 시작(영향권 1.8)의 몸은 0.54: 지구의 1/17, 진짜 티끌.
+  // 1.9·R^0.42 는 시작 몸이 지구의 1/5 = "달 두 배짜리 블랙홀"이었다 (실플레이
+  // "아직도 심각하게 크다"). 태양을 삼켜도(R90) 몸 3.8 — 지구 절반짜리 점.
+  return Math.min(radius, 0.4 * Math.sqrt(radius))
 }
 /** 조석 파괴에서 가스 스트림으로 흘러드는 비율 — 통째보다 손해: 조급함의 세금 */
 const SHRED_STREAM = 0.75
@@ -1167,9 +1170,13 @@ export class Voyage {
       // 수 시간이라 퀘이사가 영구 점화된다 — 질량 비례 하나가 양끝을 고친다.
       // 파괴 속도(bite)는 별개라 "지구 순삭" 스펙터클은 그대로다: 세계는
       // 순식간에 무너지고, 나는 그 잔해 구름 속에서 천천히 붇는다.
+      // 6%/s — 5%는 현실(수천만 년)을 너무 따라가 "먹는 맛"이 죽고 (실플레이
+      // "게이미피케이션한 부분은 있어야"), 7~10%는 복리 폭주로 봇이 2분 R25~30
+      // (계측: 5%→11.8 / 6%→20.7 / 7%→25.1 / 10%→29.7 — 먹이 사다리 연쇄로
+      // 초민감한 다이얼이다. 만질 땐 반드시 봇 재실측).
       const take = Math.min(
         this.streamIn * (1 - Math.exp(-2.2 * step)),
-        this.vol * 0.05 * step,
+        this.vol * 0.06 * step,
       )
       this.vol += take
       this.streamIn -= take
@@ -1683,7 +1690,7 @@ export class Voyage {
     // 즉시 반영은 티끌(3% 미만)만 — 즉시 문턱이 크면 요람 폭식으로 폭주한다
     // (봇 실측 30초 R22).
     const gain = bMass * ABSORB_GAIN
-    if (gain > this.vol * 0.03) this.streamIn += gain
+    if (gain > this.vol * 0.08) this.streamIn += gain
     else this.vol += gain
     this.gulp = Math.min(1, b.r / R + 0.25)
     this.eatCount += 1

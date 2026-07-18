@@ -429,10 +429,10 @@ describe('검은 입', () => {
   })
 
   it('⑳ 몸과 영향권의 분리 — 지구를 먹어도 몸은 거의 안 큰다 (실물리: +9mm)', () => {
-    expect(bodyRof(1.8), '시작 몸은 그대로').toBeCloseTo(1.8, 1)
-    expect(bodyRof(90), '태양 삼킨 영향권 90의 몸은 1/7').toBeLessThan(14)
+    expect(bodyRof(1.8), '시작 몸은 지구(9.2)의 1/13 이하 — 티끌').toBeLessThan(0.7)
+    expect(bodyRof(90), '태양을 삼켜도 몸은 지구 절반짜리 점').toBeLessThan(5)
     expect(bodyRof(90)).toBeGreaterThan(bodyRof(30))
-    expect(bodyRof(1500), '거대해질수록 몸/영향권 비는 더 벌어진다').toBeLessThan(1500 * 0.03)
+    expect(bodyRof(1500), '거대해질수록 몸/영향권 비는 더 벌어진다').toBeLessThan(1500 * 0.012)
   })
 
   it('㉑ 탈출 불변식 — 방치해도 태양에 안 처박히고, 붙잡혀도 추진으로 나온다', () => {
@@ -509,11 +509,12 @@ describe('검은 입', () => {
         if (starve > worstStarve) worstStarve = starve
       }
     }
-    // 티끌 시작(R1.8) + 질량 비례 소화 — 2분에 티끌이 "검은 입"(R12) 문턱쯤.
-    // 실측 2026-07-18: R11.8, 기아 최장 19.1s. 태양계 1막이 몇 분은 가야 한다.
-    expect(g.radius, '2분 뒤 반지름 (실측 11.8)').toBeGreaterThan(4.5)
-    // 압도감 계약 — 2분 만에 행성 사냥꾼(30)급이면 우주가 작아진다 (과속 금지)
-    expect(g.radius, `과속 금지 (r=${g.radius.toFixed(1)})`).toBeLessThan(16)
+    // 티끌 시작(R1.8) + 질량 비례 소화 6%/s — 2분에 R~21 (실측 20.7).
+    // "먹는 속도 올려"(실플레이)로 5%→6% 상향: 태양계 1막 ~4분, 한 끼 소화가
+    // 눈에 띄게 빨라진다. 몸(bodyR)은 분리돼 있어 화면 폭주는 없다.
+    expect(g.radius, '2분 뒤 반지름 (실측 20.7)').toBeGreaterThan(8)
+    // 압도감 계약 — 2분 만에 행성 사냥꾼(30)을 넘으면 우주가 작아진다 (과속 금지)
+    expect(g.radius, `과속 금지 (r=${g.radius.toFixed(1)})`).toBeLessThan(26)
     expect(worstStarve, '최장 기아 구간(초)').toBeLessThan(30)
   })
 })
