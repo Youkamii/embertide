@@ -14,7 +14,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { hashSeed } from '../engine/rng'
 import { LY, STAR_MAP } from '../game/starmap'
-import { BodyKind, bhRadius, type Voyage } from '../game/voyage'
+import { BodyKind, bhRadius, bodyRof, type Voyage } from '../game/voyage'
 
 /** 행성 대기 림 색 — 대기 조성이 곧 색이다 */
 const EARTH_ID = hashSeed('sol:지구')
@@ -41,6 +41,8 @@ const LENS_SHADER = {
     tDiffuse: { value: null },
     uHole: { value: new THREE.Vector2(0.5, 0.5) },
     uR: { value: 0.05 },
+    /** 왜곡(아인슈타인) 반경 — 몸(uR)과 분리: 질량이 커지면 이게 자란다 */
+    uE: { value: 0.05 },
     uAspect: { value: 1.77 },
     uWaveC: { value: new THREE.Vector2(0.5, 0.5) },
     uWaveT: { value: 9 },
@@ -49,7 +51,7 @@ const LENS_SHADER = {
   vertexShader: `varying vec2 vUv;
 void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
   fragmentShader: `varying vec2 vUv;
-uniform sampler2D tDiffuse; uniform vec2 uHole; uniform float uR; uniform float uAspect;
+uniform sampler2D tDiffuse; uniform vec2 uHole; uniform float uR; uniform float uE; uniform float uAspect;
 uniform vec2 uWaveC; uniform float uWaveT; uniform float uQuasar;
 void main(){
   vec2 p = vUv - uHole; p.x *= uAspect;
@@ -57,10 +59,10 @@ void main(){
   vec2 dir = d > 1e-4 ? p / d : vec2(0.0,1.0);
   // 렌즈 방정식 β = θ − α — 배경은 바깥으로 밀리고, 정렬되면 아인슈타인 링이 맺힌다.
   // (예전엔 부호가 반대라 빨아들이는 발산 렌즈였다 — 링이 원리적으로 불가능했다)
-  // 왜곡은 지평선 근방으로 국한 — 광각으로 걸면 다가가는 천체의 상이
-  // 바깥으로 밀려 "가까이 가면 멀어져 보이는" 착시가 생긴다
-  float defl = (uR*uR*1.6) / max(d, uR*0.4);
-  defl *= 1.0 - smoothstep(uR*2.6, uR*5.0, d);
+  // 왜곡 반경은 uE(영향권·√질량 눈금) — 검은 그림자(uR·몸)와 분리다:
+  // 몸은 점인데 주변 별빛이 넓게 휘는 것, 그게 블랙홀의 성장이다.
+  float defl = (uE*uE*1.6) / max(d, uE*0.4);
+  defl *= 1.0 - smoothstep(uE*2.6, uE*5.0, d);
   float b = d - defl;
   vec2 q = uHole + vec2(dir.x/uAspect, dir.y) * b;
   // 화면 밖 샘플은 렌즈를 접는다 — 가장자리 색 번짐 방지
@@ -164,7 +166,8 @@ export class Scene3D {
 
   /** 카메라 방위각 — 오른쪽 드래그로 돈다. 이동(WASD)은 이 기준으로 변환된다 */
   yaw = 0
-  pitch = 0.62
+  /** 시작은 지평선 구도(0.3) — 지구가 하늘의 절반을 덮는 각도 */
+  pitch = 0.3
   zoomBias = 1
 
   private readonly lit: THREE.InstancedMesh
@@ -326,19 +329,20 @@ export class Scene3D {
     // 강착원반 — 샤쿠라-순야예프 온도 구배(T∝r^-¾: 안쪽 백청, 바깥 적색) +
     // 케플러 차등 회전(안쪽이 빠르다) + 도플러 비밍(다가오는 쪽이 밝다) + 난류 줄무늬
     this.diskMat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uFeed: { value: 0 } },
+      uniforms: { uTime: { value: 0 }, uFeed: { value: 0 }, uInner: { value: 0.4 } },
       vertexShader: `varying vec2 vP;
 void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
       fragmentShader: `varying vec2 vP;
-uniform float uTime; uniform float uFeed;
+uniform float uTime; uniform float uFeed; uniform float uInner;
 void main(){
   float r = length(vP);
-  float T = pow(1.35/r, 0.75);
+  float T = pow(max(uInner*2.2, 1.35)/max(r, 1e-3), 0.75);
   vec3 col = mix(vec3(1.0,0.36,0.12), vec3(1.15,1.3,1.55), smoothstep(0.55,1.0,T));
-  float phi = atan(vP.y,vP.x) - uTime*1.7*inversesqrt(r*r*r);
-  float beam = pow(1.0 + 0.28*sin(atan(vP.y,vP.x))/sqrt(r), 2.0);
+  float phi = atan(vP.y,vP.x) - uTime*1.7*inversesqrt(max(r*r*r, 1e-4));
+  float beam = pow(1.0 + 0.28*sin(atan(vP.y,vP.x))/sqrt(max(r,1e-3)), 2.0);
   float streak = 0.84 + 0.16*sin(phi*9.0 + r*14.0);
-  float alpha = (1.0-smoothstep(1.4,3.1,r)) * smoothstep(1.32,1.5,r) * (0.2+uFeed*0.45);
+  // 안쪽 가장자리는 검은 몸(uInner)에 붙는다 — 몸은 점, 원반은 영향권
+  float alpha = (1.0-smoothstep(1.4,3.1,r)) * smoothstep(uInner, uInner*1.8, r) * (0.2+uFeed*0.45);
   gl_FragColor = vec4(col*beam*streak, alpha);
 }`,
       blending: THREE.AdditiveBlending,
@@ -346,7 +350,7 @@ void main(){
       side: THREE.DoubleSide,
       depthWrite: false,
     })
-    this.disk = new THREE.Mesh(new THREE.RingGeometry(1.35, 3.1, 72), this.diskMat)
+    this.disk = new THREE.Mesh(new THREE.RingGeometry(0.02, 3.1, 72), this.diskMat)
     this.disk.rotation.x = -Math.PI / 2
     this.scene.add(this.disk)
     // 상대론적 쌍제트 — 퀘이사 모드에서 스핀축(위아래)으로 뿜는 빛기둥
@@ -539,12 +543,15 @@ void main(){
   /** 게임 상태 → 씬. 매 프레임. (게임 x,y,z → three x, z↑, y) */
   sync(g: Voyage, t: number): void {
     const R = g.radius
+    /** 시각 몸 — 영향권(R)과 분리된 진짜 "검은 몸". 지구를 먹어도 거의 안 큰다 */
+    const BR = bodyRof(R)
     const px = g.x
     const py = g.z // three y = 게임 z (위)
     const pz = g.y
 
-    // 카메라 — 내가 보이되 세계를 가리지 않는 거리
-    const dist = g.camera.viewHeight * 0.78 * this.zoomBias
+    // 카메라 — 티끌일 땐 몸의 ~14배까지 바짝(행성이 하늘을 채운다), R5부터 표준
+    const kCam = 0.78 - 0.36 * Math.max(0, 1 - R / 5)
+    const dist = g.camera.viewHeight * kCam * this.zoomBias
     const cp = Math.cos(this.pitch)
     this.camera.position.set(
       px + Math.sin(this.yaw) * cp * dist,
@@ -889,9 +896,10 @@ void main(){
         continue
       }
       const rr = bhRadius(rv.vol)
+      const rBody = bodyRof(rr)
       m.visible = true
       m.position.set(rv.x, rv.z, rv.y)
-      m.scale.setScalar(rr)
+      m.scale.setScalar(rBody) // 검은 몸은 작다 — 후광(영향권)이 크기를 말한다
       const threat = rr > R
       sp.visible = true
       sp.position.copy(m.position)
@@ -900,7 +908,7 @@ void main(){
       sp.material.opacity = 0.85
       rg.visible = true
       rg.position.copy(m.position)
-      rg.scale.setScalar(rr * 1.9)
+      rg.scale.setScalar(rBody * 2.2)
       rg.material.color.setRGB(1.6, 1.2, 0.7)
       rg.material.opacity = 0.9
     }
@@ -942,7 +950,7 @@ void main(){
     // 나선낙하 — 상대가 미친 속도로 나를 감아 돈다 (LIGO)
     if (g.merging) {
       const mg = g.merging
-      const rr = bhRadius(mg.vol)
+      const rr = bodyRof(bhRadius(mg.vol))
       this.mergeMesh.visible = true
       this.mergeMesh.position.set(
         px + Math.cos(mg.ang) * mg.rad,
@@ -952,7 +960,7 @@ void main(){
       this.mergeMesh.scale.setScalar(rr)
       this.mergeGlow.visible = true
       this.mergeGlow.position.copy(this.mergeMesh.position)
-      this.mergeGlow.scale.setScalar(rr * 3)
+      this.mergeGlow.scale.setScalar(rr * 3.5)
       this.mergeGlow.material.opacity = 0.9
     } else {
       this.mergeMesh.visible = false
@@ -972,13 +980,15 @@ void main(){
       }
     }
 
-    // 나 + 원반 + 제트
+    // 나 + 원반 + 제트 — 검은 몸(BR)은 작고, 원반·제트(영향권 R)는 거대하다.
+    // 실물리 그대로: M87 제트는 지평선의 수만 배다.
     this.playerMesh.position.set(px, py, pz)
-    this.playerMesh.scale.setScalar(R)
+    this.playerMesh.scale.setScalar(BR)
     this.disk.position.set(px, py, pz)
     this.disk.scale.setScalar(R)
     this.diskMat.uniforms['uTime']!.value = t
     this.diskMat.uniforms['uFeed']!.value = Math.min(1, g.feed + g.quasar * 0.7)
+    this.diskMat.uniforms['uInner']!.value = Math.max(0.03, (BR / R) * 1.2)
     for (let i = 0; i < this.jets.length; i++) {
       const jet = this.jets[i]!
       const s = i === 0 ? 1 : -1
@@ -988,14 +998,14 @@ void main(){
       ;(jet.material as THREE.MeshBasicMaterial).opacity = power * 0.5
     }
 
-    // 렌즈 — 내 화면 위치와 화면 반지름
+    // 렌즈 — 검은 그림자는 몸(BR), 왜곡은 영향권(R 의 √눈금): 분리가 성장의 문법
     this.v3.set(px, py, pz).project(this.camera)
     const w = this.renderer.domElement.clientWidth
     const h = Math.max(1, this.renderer.domElement.clientHeight)
     this.lensPass.uniforms['uHole']!.value.set((this.v3.x + 1) / 2, (this.v3.y + 1) / 2)
-    const rScreen = R / (Math.tan((this.camera.fov * Math.PI) / 360) * dist * 2)
-    // 렌즈는 존재 증명이되 화면을 먹으면 안 된다 — 실크기 기준, 바닥만 살짝
-    this.lensPass.uniforms['uR']!.value = Math.max(0.013, rScreen)
+    const screenK = Math.tan((this.camera.fov * Math.PI) / 360) * dist * 2
+    this.lensPass.uniforms['uR']!.value = Math.max(0.006, BR / screenK)
+    this.lensPass.uniforms['uE']!.value = Math.max(0.016, (BR + (R - BR) * 0.5) / screenK)
     this.lensPass.uniforms['uAspect']!.value = w / h
     this.lensPass.uniforms['uQuasar']!.value = g.quasar
     // 중력파 → 렌즈 물결

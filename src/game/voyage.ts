@@ -20,7 +20,7 @@ import type { Input } from '../engine/input'
 import type { Renderer } from '../engine/renderer'
 import { Rng, hashSeed } from '../engine/rng'
 import { Shape } from '../engine/shapes'
-import { KUIPER, LY, PROBES, SHELL, STAR_MAP, pxOf, type MapSystem } from './starmap'
+import { HOLES, KUIPER, PROBES, SHELL, STAR_MAP, pxOf, type MapSystem } from './starmap'
 import { catalogName, nameOf, realName, registerName, starLog, starName, type RealName } from './starnames'
 
 /** 섹터 시드 상수 — 절차 채움(오르트 얼음·떠돌이)의 결정론 유지 */
@@ -75,6 +75,17 @@ export function bhRadius(vol: number): number {
   let r = Math.cbrt(vol / 9)
   for (let i = 0; i < 4; i++) r = Math.cbrt(vol / bhDensity(r))
   return r
+}
+
+/**
+ * 시각 몸 반지름 — R(영향권·조석 사거리)과 분리된 "화면에 그리는 검은 몸".
+ * 실물리: 지구를 통째로 먹어도 지평선은 +9mm, 조석 반경은 +2,556km — 몸은
+ * 거의 안 크고 사거리만 폭증한다 (손톱 블랙홀 조사, 2026-07-18). 판정·물리는
+ * 전부 R 그대로고 이건 렌더 전용이다. R1.8(시작)에선 몸=R, 태양을 삼킨
+ * R90에서 몸 12.6(영향권의 1/7), R1500에서 41(1/36).
+ */
+export function bodyRof(radius: number): number {
+  return Math.min(radius, 1.9 * Math.pow(radius, 0.42))
 }
 /** 조석 파괴에서 가스 스트림으로 흘러드는 비율 — 통째보다 손해: 조급함의 세금 */
 const SHRED_STREAM = 0.75
@@ -164,7 +175,7 @@ export function rankOf(radius: number): string {
  * 화면 체감(0.48화면/s²)이다.
  */
 function thrustAcc(radius: number): number {
-  return 62.4 * Math.pow(Math.max(130, radius * 26) / 130, 0.85)
+  return 62.4 * Math.pow(Math.max(40, radius * 26) / 130, 0.85)
 }
 
 export interface Rival {
@@ -285,7 +296,7 @@ export class Voyage {
   waveZ = 0
   waveT = 1e9
   /** 나선낙하 — 합병 직전, 서로를 미친 속도로 감아 도는 단계 (LIGO) */
-  merging: { ang: number; rad: number; w: number; t: number; vol: number; z: number } | null = null
+  merging: { ang: number; rad: number; w: number; t: number; vol: number; z: number; name: string } | null = null
   private nibbleCd = 0
   private driftCd = 3
   private driftN = 0
@@ -410,14 +421,20 @@ export class Voyage {
     // 첫 화면부터 행성이 거대해야 한다 ("왜 시작부터 토성만 해": 실플레이)
     const earth = this.active.find((b) => b.id === hashSeed('sol:지구'))
     if (earth) {
-      this.x = earth.x + earth.r * 5
-      this.y = earth.y + earth.r * 2.5
+      // 표면 곁 스폰 — 지구가 하늘의 절반을 덮는 거리 (몸의 ~6배)
+      this.x = earth.x + earth.r * 2.0
+      this.y = earth.y + earth.r * 0.8
       this.z = earth.z
+      // 궤도 스폰 — 지구와 같은 공전 속도로 눈뜬다 (달처럼 동행). 정지 스폰이면
+      // 태양으로 자유낙하해 첫 화면이 "빨려들어가서 못 움직임"이 된다 (실플레이).
+      this.vx = earth.vx
+      this.vy = earth.vy
+      this.vz = earth.vz
       this.refreshSectors(true)
     }
     this.camera.x = this.x
     this.camera.y = this.y
-    this.camera.viewHeight = Math.max(160, this.radius * 30)
+    this.camera.viewHeight = Math.max(48, this.radius * 30)
     this.persist()
   }
 
@@ -828,27 +845,18 @@ export class Voyage {
     return list
   }
 
-  /** 이 섹터의 결정론 라이벌 — 성간부터 나타난다. 요람은 안전해야 한다. */
+  /** 이 섹터의 블랙홀 — **실존 카탈로그만** (starmap.HOLES). 우주 시뮬처럼
+   * 블랙홀은 희귀 랜드마크다: 절차 생성으로 깔면 "무슨 다른 천체 있듯 블랙홀이
+   * 있는" 우주가 된다 (실플레이 판정 — 전면 폐지). */
   private sectorRival(sx: number, sy: number): Rival | null {
-    const rC = Math.hypot((sx + 0.5) * SECTOR, (sy + 0.5) * SECTOR)
-    // 태양계 전체(오르트 안)가 요람이다 — 카이퍼에서 만난 라이벌은 "빨간 게
-    // 부딪히기나 하는" 초반 훼방꾼이었다 (실플레이). 사냥터는 진짜 성간부터.
-    if (rC < SHELL.oortOut) return null
-    const seed = hashSeed(`${UNIVERSE_SEED}:rv:${sx}:${sy}`)
-    const rng = new Rng(seed)
-    // 밀도는 유지 — 요람 보호가 명분이지 성간까지 심심해질 이유는 없다 (적대 리뷰)
-    if (rng.next() >= 0.13) return null
-    const r = Math.min(760, 24 + (rC / LY) * 26 + rng.next() * 20)
-    return {
-      id: seed,
-      x: sx * SECTOR + rng.next() * SECTOR,
-      y: sy * SECTOR + rng.next() * SECTOR,
-      z: (rng.next() - 0.5) * 4000,
-      vx: 0,
-      vy: 0,
-      vz: 0,
-      vol: volFor(r),
+    for (const h of HOLES) {
+      if (Math.floor(h.x / SECTOR) === sx && Math.floor(h.y / SECTOR) === sy) {
+        const id = hashSeed(`hole:${h.name}`)
+        registerName(id, h.name, h.log)
+        return { id, x: h.x, y: h.y, z: h.z, vx: 0, vy: 0, vz: 0, vol: volFor(h.r) }
+      }
     }
+    return null
   }
 
   /** 활성 반경(섹터) — 시야가 커지면 세계도 넓게 깬다. 이게 없으면 거대해질수록
@@ -913,10 +921,11 @@ export class Voyage {
     const R = this.radius
     // 줌 눈금 — 거대해질수록 R×26 → R×18 로 수렴: 무한 줌아웃이면 주변이 전부
     // 동전이 된다 (실플레이). 내 존재감과 이웃의 크기가 같이 자란다.
-    // 바닥 130: 티끌의 눈높이. 950 이면 목성 옆에 붙어도 화면의 4% 동전이다
-    // ("토성이 보이면 화면 한구석을 가려야": 실플레이) — 행성이 하늘을 채우려면
-    // 카메라가 내 몸집 눈금으로 바짝 붙어야 한다.
-    const base = Math.max(130, R * (26 - 8 * Math.min(1, R / 1300)))
+    // 바닥 40: 티끌의 눈높이. 130에서도 시작 카메라가 몸의 56배 거리라 지구가
+    // 7.8°(동전)였다 — 40이면 지구 각지름 ~28° = 화면 세로 절반 (계측 근거:
+    // 스케일 조사 에이전트 기하 계산). 바닥은 R<5 에서만 효력이라 그 뒤 페이스
+    // 는 무변경이다.
+    const base = Math.max(40, R * (26 - 8 * Math.min(1, R / 1300)))
 
     // 추진 — 화면 눈금으로 민첩하게, 놓으면 서서히 선다. 역추진은 브레이크다.
     const mx = input.move.x
@@ -956,11 +965,12 @@ export class Voyage {
       }
       if (lift !== 0) this.vz += lift * acc * 1.15 * step
     }
-    // 항력 — 추진 중엔 낮고, 놓으면 강하다 ("브레이크 없는 엑셀" 판정의 수리).
-    // z 는 따로: 상승키를 놓으면 수직 흐름이 빨리 죽는다 — 층 이동은 탭으로 끝나야
-    // 하고, 진동하면 조작 지옥이다 (계측: 봇 z ±760 발진).
-    // 활공 0.3 — "적당히 미끄러져야지": 0.6 은 급정거였고 0.1 은 브레이크가 없었다
-    const dragK = this.thrusting ? 0.14 : 0.3
+    // 항력 — 추진 중엔 낮고, 먹이 곁에서 놓으면 강하다 ("브레이크 없는 엑셀"의
+    // 수리). 단 **빈 우주에선 거의 없다** — 활공 항력이 공전 속도까지 죽이면
+    // 궤도 스폰이 무력화되어 정지→태양 자유낙하가 된다 (계약 ㉑ 실측: 30초 방치
+    // 에 태양 심부 도달). 우주에 마찰은 원래 없다 — 정지 손맛은 사냥 중에만.
+    // z 는 따로: 상승키를 놓으면 수직 흐름이 빨리 죽는다 (계측: 봇 z ±760 발진).
+    const dragK = this.thrusting ? 0.14 : this.preyDist < base * 2 ? 0.3 : 0.05
     const drag = Math.exp(-dragK * step)
     this.vx *= drag
     this.vy *= drag
@@ -1083,6 +1093,11 @@ export class Voyage {
 
     // 중력 — 나보다 큰 것만 나를 끈다. 커질수록 세계가 조용해진다.
     // 사거리 컷 없음 — 1/r² 이 알아서 줄인다.
+    // 탈출 불변식: 당김 상한 ≤ 내 추진의 80% (역추진 1.7배가 언제나 이긴다).
+    // 티끌 눈금(추진 62)에서 상수 상한(340)은 태양에 붙잡히면 감옥이었다 (실플레이).
+    const pullCapMe = Math.min(PULL_CAP_ON_ME, acc * 0.8)
+    let domG = 0
+    let domB: Body | null = null
     for (const b of this.active) {
       if (b.r <= R || this.eaten.has(b.id)) continue
       const dx = b.x - this.x
@@ -1090,10 +1105,34 @@ export class Voyage {
       const dz = b.z - this.z
       const d2 = dx * dx + dy * dy + dz * dz
       const d = Math.sqrt(d2) || 1
-      const g = Math.min(PULL_CAP_ON_ME, (b.r * b.r * GRAV) / d2)
+      const g = Math.min(pullCapMe, (b.r * b.r * GRAV) / d2)
+      if (g > domG) {
+        domG = g
+        domB = b
+      }
       this.vx += (dx / d) * g * step
       this.vy += (dy / d) * g * step
       this.vz += (dz / d) * g * step
+    }
+    // 궤도 관성 — 입력이 없으면 지배 천체의 케플러 흐름에 실린다. 우주의 기본
+    // 상태는 정지가 아니라 궤도다: 정지+상시 중력=낙하는 필연이라, 이게 없으면
+    // 방치가 곧 태양 추락이 된다 (계약 ㉑ 실측). 추진하는 순간 자유다.
+    if (!this.thrusting && domB && domG > 0.5) {
+      const dx = domB.x - this.x
+      const dy = domB.y - this.y
+      const d = Math.hypot(dx, dy) || 1
+      const tx = -dy / d
+      const ty = dx / d
+      const rel0x = this.vx - domB.vx
+      const rel0y = this.vy - domB.vy
+      const sign = rel0x * tx + rel0y * ty >= 0 ? 1 : -1
+      const vCirc = Math.sqrt(domG * d)
+      // 보정 12/s + 정상상태 내향 오차(g/12)만큼의 바깥 바이어스 — 느슨한 보정은
+      // 중력 래칫으로 나선낙하가 된다 (계측: 0.5/s 에서 내향 42px/s)
+      const k = 1 - Math.exp(-12 * step)
+      const bias = domG / 12
+      this.vx += (domB.vx + tx * sign * vCirc - (dx / d) * bias - this.vx) * k
+      this.vy += (domB.vy + ty * sign * vCirc - (dy / d) * bias - this.vy) * k
     }
 
     // 속도 상한 — 화면 1.6장/초 (순항 중엔 순항 배율만큼 열린다).
@@ -1112,16 +1151,9 @@ export class Voyage {
     this.x += this.vx * step
     this.y += this.vy * step
     this.z += this.vz * step
-    // z 슬랩 — 우주는 넓지만 무한히 뜨면 아무도 못 만난다.
-    // 0.8 은 천장이 2초 거리라 "z축 못 움직여"가 됐다 (실플레이) — 넉넉히.
-    const zMax = base * 2.2
-    if (this.z > zMax) {
-      this.z = zMax
-      if (this.vz > 0) this.vz = 0
-    } else if (this.z < -zMax) {
-      this.z = -zMax
-      if (this.vz < 0) this.vz = 0
-    }
+    // z 상한 없음 — 상한을 두면서 천체를 그 너머에 뿌리는 건 말이 안 된다
+    // (실플레이: "오브젝트는 그 너머에 있는 것도 말이 되냐"). 미아 방지는
+    // 강한 무입력 z 감쇠 + 먹이 평면 수렴 + 나침반 z 화살표가 맡는다.
     this.refreshSectors()
 
     const dist = Math.hypot(this.x, this.y)
@@ -1347,6 +1379,7 @@ export class Voyage {
             t: 0,
             vol: rv.vol,
             z: rv.z - this.z,
+            name: nameOf(rv.id)?.name ?? '블랙홀',
           }
           this.rivals.splice(i, 1)
           this.sfx('boom')
@@ -1422,10 +1455,9 @@ export class Voyage {
         this.gulp = 1
         this.feed = 1
         if (rr > this.biggestMeal) this.biggestMeal = Math.round(rr)
-        const rn = realName('hole', (mg.vol | 0) >>> 0)
         const entry: JournalEntry = {
-          name: `${rn.name} — 다른 검은 입`,
-          log: rn.log,
+          name: mg.name,
+          log: '',
           kind: BodyKind.Core,
           r: Math.round(rr),
           x: Math.round(this.x),
@@ -1671,10 +1703,11 @@ export class Voyage {
     }
     this.sfx(b.r > R * 0.45 ? 'evolve' : 'pickup')
     if (b.kind !== BodyKind.Dust || b.r >= 10) {
+      // 감상 문구 없음 — 명부는 이름·크기·좌표만 기록한다 (문구 기능 전면 폐지: 실플레이)
       const rn = b.hot ? null : this.nameBody(b)
       const entry: JournalEntry = {
         name: rn ? rn.name : `${starName(b.id)}의 잔해`,
-        log: rn ? rn.log : '내 조석이 그것을 먼저 찢었다.',
+        log: '',
         kind: b.kind,
         r: Math.round(b.r),
         x: Math.round(b.x),
@@ -1718,8 +1751,8 @@ export class Voyage {
     this.camera.shake(3, 7)
     if (b.kind !== BodyKind.Dust || b.r >= 10) {
       const entry: JournalEntry = {
-        name: `${this.nameBody(b).name} — 조석 파괴`,
-        log: '삼키기엔 컸다. 그래서 찢었다.',
+        name: this.nameBody(b).name,
+        log: '',
         kind: b.kind,
         r: Math.round(b.r),
         x: Math.round(b.x),
@@ -1792,7 +1825,7 @@ export class Voyage {
     this.camera.shake(nova ? 7 : 4, 7)
     const entry: JournalEntry = {
       name: `${this.nameBody(b).name} — ${nova ? '초신성' : '행성상성운'}`,
-      log: nova ? '별이 무너지며 제 살을 우주에 돌려주었다.' : '껍질을 벗고 하얀 심만 남았다.',
+      log: '',
       kind: b.kind,
       r: Math.round(b.r0),
       x: Math.round(b.x),

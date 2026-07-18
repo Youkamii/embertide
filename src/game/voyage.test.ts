@@ -22,7 +22,7 @@ import { describe, expect, it } from 'vitest'
 import type { Input } from '../engine/input'
 import { SHELL, STAR_MAP } from './starmap'
 import { nameOf } from './starnames'
-import { BodyKind, Voyage, rankOf, volFor, type Body, type Store } from './voyage'
+import { BodyKind, Voyage, bodyRof, rankOf, volFor, type Body, type Store } from './voyage'
 
 function mockInput(x: number, y: number, lift = 0): Input {
   return { move: { x, y }, lift } as unknown as Input
@@ -321,7 +321,7 @@ describe('검은 입', () => {
     g.start(null)
     // 상승 입력은 z 를 올린다
     for (let s = 0; s < 60; s++) g.update(mockInput(0, 0, 1), 1 / 60)
-    expect(g.z, '떠올랐다 (티끌 눈금: 가속 62.4 기준 1초 ≈ 30px)').toBeGreaterThan(15)
+    expect(g.z, '떠올랐다 (티끌 눈금: 1초 ≈ 11px 실측)').toBeGreaterThan(8)
 
     const g2 = new Voyage()
     g2.start(null)
@@ -426,6 +426,33 @@ describe('검은 입', () => {
     expect(g.merging, '합병이 끝났다').toBeNull()
     expect(g.waveT, '중력파가 퍼졌다').toBeLessThan(11)
     expect(g.vol, '질량이 내 것이 됐다 (에딩턴 유입은 느긋하다)').toBeGreaterThan(vol0 * 1.02)
+  })
+
+  it('⑳ 몸과 영향권의 분리 — 지구를 먹어도 몸은 거의 안 큰다 (실물리: +9mm)', () => {
+    expect(bodyRof(1.8), '시작 몸은 그대로').toBeCloseTo(1.8, 1)
+    expect(bodyRof(90), '태양 삼킨 영향권 90의 몸은 1/7').toBeLessThan(14)
+    expect(bodyRof(90)).toBeGreaterThan(bodyRof(30))
+    expect(bodyRof(1500), '거대해질수록 몸/영향권 비는 더 벌어진다').toBeLessThan(1500 * 0.03)
+  })
+
+  it('㉑ 탈출 불변식 — 방치해도 태양에 안 처박히고, 붙잡혀도 추진으로 나온다', () => {
+    const g = new Voyage()
+    g.start(null)
+    const sun = g.active.find((b) => nameOf(b.id)?.name === '태양')!
+    // 30초 무입력 방치 — 궤도 스폰이라 자유낙하하지 않는다 (실플레이 "빨려서 못 움직임")
+    const idle = mockInput(0, 0)
+    for (let s = 0; s < 1800; s++) g.update(idle, 1 / 60)
+    const d0 = Math.hypot(g.x - sun.x, g.y - sun.y)
+    expect(d0, '방치해도 태양 표면에 안 붙는다').toBeGreaterThan(sun.r * 1.6)
+    // 태양 표면에 붙여놔도 바깥 추진으로 빠져나온다 (당김 상한 ≤ 추진 80%)
+    g.x = sun.x + sun.r * 1.15
+    g.y = sun.y
+    g.vx = 0
+    g.vy = 0
+    g.vz = 0
+    for (let s = 0; s < 600; s++) g.update(mockInput(1, 0), 1 / 60)
+    const d1 = Math.hypot(g.x - sun.x, g.y - sun.y)
+    expect(d1, '탈출했다').toBeGreaterThan(sun.r * 3)
   })
 
   it('⑪ 탐욕스럽게 쫓기만 해도 굶지 않는다 — 성장 페이스', () => {

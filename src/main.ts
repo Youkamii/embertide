@@ -5,7 +5,6 @@
  * 이동은 카메라 기준(WASD·마우스), 카메라는 오른쪽 드래그·휠.
  */
 import * as THREE from 'three'
-import { Audio } from './engine/audio'
 import { Input } from './engine/input'
 import { LY } from './game/starmap'
 import { STORE_KEY, Voyage, rankOf, type Store } from './game/voyage'
@@ -24,7 +23,6 @@ function boot(): void {
   if (!canvas) throw new Error('캔버스를 찾을 수 없습니다.')
   const scene = new Scene3D(canvas)
   const input = new Input(canvas)
-  const audio = new Audio()
   const game = new Voyage()
 
   const store: Store = {
@@ -33,19 +31,14 @@ function boot(): void {
   }
   game.start(store)
 
-  const wake = (): void => {
-    audio.start()
-    audio.resume()
-  }
-  window.addEventListener('pointerdown', wake, { once: true })
-  window.addEventListener('keydown', wake, { once: true })
+  // 소리 없음 — 오디오는 구 게임의 유물이었고 판정으로 전부 제거됐다 (2026-07-18)
   // 배치 저장의 마지막 조각 — 탭을 닫아도 마지막 한 입은 명부에 남는다
   window.addEventListener('pagehide', () => game.flush())
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') game.flush()
   })
 
-  ;(window as unknown as Record<string, unknown>)['MAW'] = { game, scene, audio, input }
+  ;(window as unknown as Record<string, unknown>)['MAW'] = { game, scene, input }
 
   const ui = document.getElementById('ui')!
 
@@ -101,7 +94,6 @@ function boot(): void {
     for (let i = game.journal.length - 1; i >= Math.max(0, game.journal.length - 40); i--) {
       const e = game.journal[i]!
       line(`「${e.name}」  r${e.r}  (${e.x}, ${e.y})`, 'color:#ffe6b8;margin-top:10px')
-      line(e.log, 'color:#8fa8c4;font-size:13px')
     }
     line('J — 닫기', 'margin-top:26px;color:#5f7893;font-size:12px')
     journalEl.appendChild(wrap)
@@ -137,7 +129,7 @@ function boot(): void {
     line('카이퍼 벨트와 오르트 구름을 지나면, 빈 우주에선 성간 순항이 붙는다', 'font-size:13px;color:#6f8299;line-height:2;margin-top:14px')
     line('나침반이 언제나 다음 별을 가리킨다 — 은하수는 넓고, 끝은 안드로메다 너머다', 'font-size:13px;color:#6f8299;line-height:2')
     line('이동 WASD · 상승 스페이스 · 하강 시프트', 'font-size:13px;color:#ffd9a8;line-height:2')
-    line('시점: 마우스 왼쪽 드래그 · 줌 휠 | J 명부 · M 소리', 'font-size:13px;color:#6f8299;line-height:2')
+    line('시점: 마우스 왼쪽 드래그 · 줌 휠 | J 명부', 'font-size:13px;color:#6f8299;line-height:2')
     line('아무 키나 눌러 눈을 뜬다 — 항해는 언제나 티끌에서 시작한다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
     if (game.journal.length > 0) {
       line(
@@ -173,7 +165,6 @@ function boot(): void {
       if (input.anyInput) {
         started = true
         center.replaceChildren()
-        wake()
       }
       game.visualTime += dt
       scene.resize()
@@ -189,7 +180,6 @@ function boot(): void {
       journalEl.style.display = journalOpen ? 'grid' : 'none'
       if (journalOpen) renderJournal()
     }
-    if (input.consumePressed('m')) audio.setMuted(!audio.muted)
     if (input.consumePressed('x')) scene.axes.visible = !scene.axes.visible
 
     if (!journalOpen) {
@@ -200,11 +190,10 @@ function boot(): void {
     scene.sync(game, game.visualTime)
     scene.render()
 
-    for (let i = 0; i < game.sfxQueue.length; i++) audio.play(game.sfxQueue[i]!)
     game.sfxQueue.length = 0
 
     if (game.lastFound) {
-      foundEl.textContent = `「${game.lastFound.name}」 을 삼켰다\n${game.lastFound.log}`
+      foundEl.textContent = `「${game.lastFound.name}」`
       foundEl.style.opacity = '1'
       foundUntil = now + 4200
       game.lastFound = null
@@ -260,8 +249,15 @@ function boot(): void {
       : game.cruise > 1.5
         ? `\n성간 순항 ×${game.cruise.toFixed(1)}`
         : ''
+    // 성장은 반지름이 아니라 질량이다 — 블랙홀은 지구를 먹어도 몸이 9mm 큰다
+    const mE = game.vol / 779
+    const mass = mE >= 936
+      ? `태양 ×${(game.vol / 729000).toFixed(game.vol / 729000 < 100 ? 1 : 0)}`
+      : mE >= 1
+        ? `지구 ×${mE >= 100 ? Math.round(mE) : mE.toFixed(1)}`
+        : `달 ×${Math.max(1, Math.round(game.vol / 15.6))}`
     coords.textContent =
-      `${rankOf(game.radius)}  ·  r${Math.round(game.radius)}\n` +
+      `${rankOf(game.radius)}  ·  질량 ${mass}\n` +
       `(${Math.round(game.x)}, ${Math.round(game.y)}, z${Math.round(game.z)})  ·  ` +
       `이번 항해 ${game.eatenThisRun} · 명부 ${game.journal.length}` +
       `${game.halo.length > 0 ? ` · 나의 은하 ${game.halo.length}성` : ''}` +
