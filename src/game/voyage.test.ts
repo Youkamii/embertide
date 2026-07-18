@@ -428,11 +428,11 @@ describe('검은 입', () => {
     expect(g.vol, '질량이 내 것이 됐다 (에딩턴 유입은 느긋하다)').toBeGreaterThan(vol0 * 1.02)
   })
 
-  it('⑳ 몸과 영향권의 분리 — 지구를 먹어도 몸은 거의 안 큰다 (실물리: +9mm)', () => {
-    expect(bodyRof(1.8), '시작 몸은 지구(9.2)의 1/13 이하 — 티끌').toBeLessThan(0.7)
-    expect(bodyRof(90), '태양을 삼켜도 몸은 지구 절반짜리 점').toBeLessThan(5)
+  it('⑳ 몸은 영구히 점이다 — 뭘 먹어도 화면상 크기는 사실상 불변 (실물리: 태양=3km)', () => {
+    expect(bodyRof(1.8), '시작 몸 — 점').toBeLessThan(0.7)
+    expect(bodyRof(90), '태양을 삼켜도 점 (시작의 2배 미만)').toBeLessThan(bodyRof(1.8) * 2)
     expect(bodyRof(90)).toBeGreaterThan(bodyRof(30))
-    expect(bodyRof(1500), '거대해질수록 몸/영향권 비는 더 벌어진다').toBeLessThan(1500 * 0.012)
+    expect(bodyRof(1500), '은하심급이 되어도 점').toBeLessThan(2.5)
   })
 
   it('㉑ 탈출 불변식 — 방치해도 태양에 안 처박히고, 붙잡혀도 추진으로 나온다', () => {
