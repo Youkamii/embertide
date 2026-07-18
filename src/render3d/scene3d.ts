@@ -112,24 +112,28 @@ function glowTexture(): THREE.Texture {
 }
 
 function smokeTexture(): THREE.Texture {
+  // 뭉게 — 고해상(256) + 잘고 많은 방울: 128px 를 수백 px 로 확대하면
+  // 뿌연 떡이 된다 ("가스 구름 개 짜쳐": 실플레이)
   const c = document.createElement('canvas')
-  c.width = c.height = 128
+  c.width = c.height = 256
   const ctx = c.getContext('2d')!
-  // 뭉게 — 반경 그라디언트 여러 방울
   let s = 7
   const rnd = (): number => {
     s = (s * 16807) % 2147483647
     return s / 2147483647
   }
-  for (let i = 0; i < 9; i++) {
-    const x = 34 + rnd() * 60
-    const y = 34 + rnd() * 60
-    const r = 18 + rnd() * 30
+  for (let i = 0; i < 26; i++) {
+    const a = rnd() * Math.PI * 2
+    const rr = rnd() * rnd() * 88
+    const x = 128 + Math.cos(a) * rr
+    const y = 128 + Math.sin(a) * rr
+    const r = 10 + rnd() * 34
     const g = ctx.createRadialGradient(x, y, 1, x, y, r)
-    g.addColorStop(0, 'rgba(255,255,255,0.34)')
+    g.addColorStop(0, `rgba(255,255,255,${0.16 + rnd() * 0.16})`)
+    g.addColorStop(0.55, 'rgba(255,255,255,0.07)')
     g.addColorStop(1, 'rgba(255,255,255,0)')
     ctx.fillStyle = g
-    ctx.fillRect(0, 0, 128, 128)
+    ctx.fillRect(0, 0, 256, 256)
   }
   return new THREE.CanvasTexture(c)
 }
@@ -895,9 +899,11 @@ void main(){
       const k = src.life / src.max
       sp.visible = true
       sp.position.set(src.x, src.z, src.y)
-      sp.scale.setScalar(src.size * 2.4)
+      sp.scale.setScalar(src.size * 1.7)
+      // 회전 변주 — 같은 텍스처의 복붙 떡 방지
+      sp.material.rotation = i * 2.39996 + (1 - k) * 0.6
       sp.material.color.setRGB(src.cr * k, src.cg * k, src.cb * k)
-      sp.material.opacity = k * 0.35
+      sp.material.opacity = k * 0.26
     }
 
     // 라이벌

@@ -1085,9 +1085,10 @@ export class Voyage {
         {
           // 질량 비례 강화 — 블랙홀 질량은 R³·밀도(R)로 붇는다. 커질수록 같은
           // 거리의 행성이 더 세게 뜯겨 오고, 태양을 삼킨 몸 곁에선 온 행성계가
-          // 레일을 이탈해 낙하를 시작한다 ("전부 빨아들이는데 찰나": 실플레이).
-          const heavy = 1 + R / 120
-          const capMe = PULL_CAP_BY_ME * (1 + R / 300)
+          // 레일을 이탈해 낙하한다. 상한도 크게 열려야 "빨아들이는 위력"이
+          // 질량과 함께 어마어마해진다 (실플레이 — R300 에서 고작 2배였다).
+          const heavy = 1 + R / 60
+          const capMe = PULL_CAP_BY_ME * (1 + R / 80)
           let g = Math.min(capMe, (R * R * GRAV * MAW_PULL * heavy) / d2)
           // 먹이급 견인 보너스 — 상수 사거리 대신 부드러운 감쇠 (전역 유효)
           if (edibleB) {
@@ -1621,10 +1622,12 @@ export class Voyage {
       let best = Infinity
       let bi = -1
       for (let i = 0; i < STAR_MAP.length; i++) {
+        // 삼킨 계는 항로에서 제외 — ×4 후순위로는 "그 계 곁에 있으면 여전히
+        // 최단"이라 먹은 별을 계속 가리켰다 (실플레이: 바너드 별). 곁에 남은
+        // 성찬은 한입감 나침반이 따로 가리킨다.
+        if (this.eaten.has(MAP_IDS[i]!)) continue
         const s = STAR_MAP[i]!
-        // 앵커를 삼켰어도 계의 성찬(행성·성단원)은 남는다 — 제외 대신 후순위
-        const d = Math.hypot(s.x - this.x, s.y - this.y, s.z - this.z) *
-          (this.eaten.has(MAP_IDS[i]!) ? 4 : 1)
+        const d = Math.hypot(s.x - this.x, s.y - this.y, s.z - this.z)
         if (d < best) {
           best = d
           bi = i
