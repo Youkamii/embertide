@@ -56,11 +56,12 @@ void main(){
   float defl = (uR*uR*1.6) / max(d, uR*0.4);
   float b = d - defl;
   vec2 q = uHole + vec2(dir.x/uAspect, dir.y) * b;
-  q = clamp(q, vec2(0.0), vec2(1.0));
+  // 화면 밖 샘플은 렌즈를 접는다 — 가장자리 색 번짐 방지
+  if (q.x < 0.0 || q.x > 1.0 || q.y < 0.0 || q.y > 1.0) q = vUv;
   vec3 col = texture2D(tDiffuse, q).rgb;
-  // 렌즈 배율 — 링 근처의 배경은 실제로 밝아진다 (마이크로렌징)
-  float mag = clamp(d / max(abs(b), 2e-3), 1.0, 4.0);
-  col *= mix(1.0, mag, 0.55);
+  // 렌즈 배율 — 은은하게 (과하면 링이 화면을 지배한다)
+  float mag = clamp(d / max(abs(b), 2e-3), 1.0, 2.2);
+  col *= mix(1.0, mag, 0.25);
   // 중력파 — 시공의 물결이 화면을 실제로 출렁이며 지나간다 (합병의 흔적)
   if (uWaveT < 1.6) {
     vec2 pw = vUv - uWaveC; pw.x *= uAspect;
@@ -73,16 +74,16 @@ void main(){
   // 중력 적색편이 — 지평선 근처를 빠져나온 빛은 붉고 어둡다
   float gz = sqrt(clamp(1.0 - uR*0.92/max(d,1e-3), 0.0, 1.0));
   float zone = 1.0 - smoothstep(uR*1.05, uR*3.0, d);
-  col = mix(col, col * max(gz, 0.15) * vec3(1.0,0.6,0.4), zone*0.8);
+  col = mix(col, col * max(gz, 0.2) * vec3(1.0,0.65,0.45), zone*0.45);
   // 사건의 지평선 — 렌즈 다음에 깎아야 진짜 검다
   col = mix(col, vec3(0.0), smoothstep(uR*1.02, uR*0.88, d));
   // 광자 고리 — 임계곡선으로 수렴하는 서브링들 + 도플러 비대칭 (EHT)
   float angH = atan(p.y, p.x);
-  float dopp = 1.0 + 0.55 * sin(angH);
-  float hot = 1.0 + uQuasar * 1.2;
+  float dopp = 1.0 + 0.35 * sin(angH);
+  float hot = 1.0 + uQuasar * 0.8;
   float ring1 = exp(-pow((d - uR*1.10)/(uR*0.035), 2.0));
   float ring2 = exp(-pow((d - uR*1.03)/(uR*0.013), 2.0));
-  col += vec3(1.5,1.1,0.65) * (ring1*0.55 + ring2*0.4) * dopp * hot;
+  col += vec3(1.5,1.1,0.65) * (ring1*0.4 + ring2*0.24) * dopp * hot;
   gl_FragColor = vec4(col, 1.0);
 }`,
 }
@@ -301,9 +302,9 @@ void main(){
   float T = pow(1.35/r, 0.75);
   vec3 col = mix(vec3(1.0,0.36,0.12), vec3(1.15,1.3,1.55), smoothstep(0.55,1.0,T));
   float phi = atan(vP.y,vP.x) - uTime*1.7*inversesqrt(r*r*r);
-  float beam = pow(1.0 + 0.4*sin(atan(vP.y,vP.x))/sqrt(r), 3.0);
-  float streak = 0.72 + 0.28*sin(phi*9.0 + r*14.0);
-  float alpha = (1.0-smoothstep(1.4,3.1,r)) * smoothstep(1.32,1.5,r) * (0.3+uFeed*0.6);
+  float beam = pow(1.0 + 0.28*sin(atan(vP.y,vP.x))/sqrt(r), 2.0);
+  float streak = 0.84 + 0.16*sin(phi*9.0 + r*14.0);
+  float alpha = (1.0-smoothstep(1.4,3.1,r)) * smoothstep(1.32,1.5,r) * (0.2+uFeed*0.45);
   gl_FragColor = vec4(col*beam*streak, alpha);
 }`,
       blending: THREE.AdditiveBlending,
@@ -421,7 +422,7 @@ void main(){
     // 광자 고리가 블룸을 받아 그림자 가장자리로 번진다 (EHT·인터스텔라 룩)
     this.lensPass = new ShaderPass(LENS_SHADER)
     this.composer.addPass(this.lensPass)
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.75, 0.7, 0.78)
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.5, 0.65, 0.85)
     this.composer.addPass(this.bloom)
 
     // 카메라 조작 — 왼쪽 드래그 회전(증분·포인터 ID 단일 핸들러), 휠 줌.
@@ -519,8 +520,8 @@ void main(){
       sp.visible = true
       sp.position.set(px + (dx / d3) * skyR, py + (dy / d3) * skyR, pz + (dz / d3) * skyR)
       const imp = sys.kind === 'core' ? 2.6 : sys.kind === 'garden' ? 1.7 : 1
-      sp.scale.setScalar(skyR * 0.014 * imp)
-      sp.material.opacity = 0.85
+      sp.scale.setScalar(skyR * 0.01 * imp)
+      sp.material.opacity = 0.6
       // 라벨 — 화면 안에 있고 가까운 순 다섯
       if (labelN < 5) {
         this.v3.copy(sp.position).project(this.camera)
@@ -598,10 +599,10 @@ void main(){
         // 케페이드형(작으면 얕고 빠르게), 초거성은 표면이 얼룩덜룩 끓는다
         const ph = (b.id % 628) * 0.01
         const red = b.cr > b.cb * 1.2
-        const amp = b.r > 900 ? 0.22 : red && b.r > 300 ? 0.3 : 0.08
-        const spd = b.r > 300 ? 0.35 : 1.4
+        const amp = b.r > 900 ? 0.08 : red && b.r > 300 ? 0.1 : 0.04
+        const spd = b.r > 300 ? 0.3 : 1.1
         const pulse = 1 + amp * Math.sin(t * spd + ph)
-        const mottle = b.r > 900 ? 0.85 + 0.15 * Math.sin(t * 2.3 + ph * 7) * Math.sin(t * 1.1 + ph * 3) : 1
+        const mottle = b.r > 900 ? 0.93 + 0.07 * Math.sin(t * 0.9 + ph * 7) * Math.sin(t * 0.5 + ph * 3) : 1
         this.col.setRGB(
           Math.min(1, b.cr * pulse * mottle * (1 + redK * 0.6)),
           Math.min(1, b.cg * pulse * (1 - redK * 0.6)),
@@ -613,15 +614,15 @@ void main(){
           const sp = this.glows[glowN++]!
           sp.visible = true
           sp.position.set(ax, ay, az)
-          sp.scale.setScalar(sc * 7 * pulse)
+          sp.scale.setScalar(sc * 5.5 * pulse)
           sp.material.color.setRGB(b.cr * 0.6 * mottle, b.cg * 0.5, b.cb * 0.3)
-          sp.material.opacity = 0.7
+          sp.material.opacity = 0.5
           const core = this.glows[glowN++]!
           core.visible = true
           core.position.set(ax, ay, az)
-          core.scale.setScalar(sc * 2.6 * pulse)
+          core.scale.setScalar(sc * 2.3 * pulse)
           core.material.color.setRGB(1.4, 1.3, 1.1)
-          core.material.opacity = 0.85
+          core.material.opacity = 0.6
         }
       } else if (litN < MAX_INST) {
         this.lit.setMatrixAt(litN, this.m4)
@@ -640,7 +641,7 @@ void main(){
           sp.position.set(ax, ay, az)
           sp.scale.setScalar(sc * 2.6)
           sp.material.color.setRGB(rim[0], rim[1], rim[2])
-          sp.material.opacity = 0.4
+          sp.material.opacity = 0.22
           if (b.id === EARTH_ID) {
             // 오로라 — 태양풍이 극에 쏟아진다
             const au = this.glows[glowN++]!
@@ -648,7 +649,7 @@ void main(){
             au.position.set(ax, ay + sc * 1.05, az)
             au.scale.setScalar(sc * 1.1 * (1 + 0.2 * Math.sin(t * 3)))
             au.material.color.setRGB(0.3, 1.1, 0.5)
-            au.material.opacity = 0.5
+            au.material.opacity = 0.3
           }
         }
         // 혜성 머리 — 코마의 빛
@@ -656,9 +657,9 @@ void main(){
           const sp = this.glows[glowN++]!
           sp.visible = true
           sp.position.set(ax, ay, az)
-          sp.scale.setScalar(sc * 4)
+          sp.scale.setScalar(sc * 3.2)
           sp.material.color.setRGB(0.7, 0.85, 1.1)
-          sp.material.opacity = 0.55
+          sp.material.opacity = 0.35
         }
         // 고리 행성 — 토성의 고리가 드디어 3D 로 (카시니 간극 포함)
         if (b.kind === BodyKind.Ringed && ringN < this.rings.length) {
@@ -715,7 +716,7 @@ void main(){
       sp.position.set(src.x, src.z, src.y)
       sp.scale.setScalar(src.size * 2.4)
       sp.material.color.setRGB(src.cr * k, src.cg * k, src.cb * k)
-      sp.material.opacity = k * 0.5
+      sp.material.opacity = k * 0.35
     }
 
     // 라이벌
@@ -848,8 +849,8 @@ void main(){
     } else {
       this.lensPass.uniforms['uWaveT']!.value = 9
     }
-    // 퀘이사 점화 — 화면 전체가 뜨거워진다
-    this.bloom.strength = 0.75 + g.quasar * 0.9
+    // 퀘이사 점화 — 화면 전체가 뜨거워진다 (그래도 절제)
+    this.bloom.strength = 0.5 + g.quasar * 0.45
   }
 
   render(): void {
