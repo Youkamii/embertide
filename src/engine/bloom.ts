@@ -200,12 +200,14 @@ export const DEFAULT_BLOOM: BloomSettings = {
    * 사용자가 "이펙트 너무 세서 화면이 안 보임"이라고 했다. 여기 숫자만 만져서는
    * 절대 안 고쳐진다. 색 자체를 내려야 했다.
    */
+  // strength 0.62 → 0.48, aberration·grain 하향 (2026-07-18): 실플레이 4차 보고
+  // "이펙트 지랄" — 번짐과 색수차·그레인은 전부 "화면이 움직인다"는 감각에 가산된다.
   threshold: 1.0,
   knee: 0.35,
-  strength: 0.62,
+  strength: 0.48,
   radius: 1.0,
-  aberration: 0.014,
-  grain: 0.04,
+  aberration: 0.008,
+  grain: 0.03,
   vignette: 0.55,
 }
 

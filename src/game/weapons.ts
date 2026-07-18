@@ -411,7 +411,7 @@ function fireBeam(slot: WeaponSlot, ctx: FireCtx): void {
     }
     ctx.motes.spawn(ex, ey, 0, 0, 0.3, width * 3, def.r * FX_BASE, def.g * FX_BASE, def.b * FX_BASE, Shape.Nova, 0, 0, 1)
   }
-  ctx.shake(4, 14)
+  // 발사 셰이크 없음 — 루틴 전투는 화면을 흔들지 않는다 (camera.ts 원칙)
   ctx.sfx('bolt')
 }
 
@@ -448,7 +448,6 @@ function fireComet(slot: WeaponSlot, ctx: FireCtx): void {
       ctx.rng.next(),
     )
   }
-  ctx.shake(3, 16)
   ctx.sfx('shoot')
 }
 
@@ -475,7 +474,6 @@ function fireStill(slot: WeaponSlot, ctx: FireCtx): void {
   const power = slot.evolved ? 1.9 : 1
   ctx.placeField(Field.Still, p.x, p.y, radius, power, 3.2, slot.evolved)
   ctx.sfx('nova')
-  ctx.shake(3, 12)
 }
 
 // ── 불씨 / 장작불 ──────────────────────────────────────────────────────
@@ -567,7 +565,6 @@ function fireArc(slot: WeaponSlot, ctx: FireCtx): void {
     )
   }
   slot.phase += 0.9
-  ctx.shake(slot.evolved ? 3 : 1.6, 16)
   ctx.sfx('blade')
 }
 
@@ -615,10 +612,7 @@ function fireBolt(slot: WeaponSlot, ctx: FireCtx): void {
     // 진화하면 튈 때마다 세진다
     if (slot.evolved) dmg *= 1.16
   }
-  if (used > 0) {
-    ctx.shake(2.2, 18)
-    ctx.sfx('bolt')
-  }
+  if (used > 0) ctx.sfx('bolt')
 }
 
 /** 체인이 방문한 적. 모듈 레벨 버퍼 — 단일 스레드라 안전하다. */
@@ -711,8 +705,7 @@ function fireNova(slot: WeaponSlot, ctx: FireCtx): void {
   }
 
   ctx.motes.spawn(p.x, p.y, 0, 0, 0.5, radius * (slot.evolved ? 0.5 : 1), def.r, def.g, def.b, Shape.Ring, 0, 0, 1)
-  spray(ctx.motes, p.x, p.y, 1, 0, 6.283, 10, def.r * FX_BASE, def.g * FX_BASE, def.b * FX_BASE, slot.evolved ? -260 : 340, 0.4, 4)
-  ctx.shake(slot.evolved ? 7 : 5, 12)
+  spray(ctx.motes, p.x, p.y, 1, 0, 6.283, 8, def.r * FX_BASE, def.g * FX_BASE, def.b * FX_BASE, slot.evolved ? -260 : 340, 0.4, 4)
   ctx.sfx('nova')
 }
 

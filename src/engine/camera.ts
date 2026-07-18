@@ -1,7 +1,10 @@
 /**
  * 카메라. 부드러운 추적 + 화면 흔들림 + 줌.
  *
- * 흔들림은 공짜 도파민이다. 타격마다 아주 조금씩 흔들리면 같은 그림도 손맛이 다르다.
+ * 흔들림 원칙 (실플레이 "화면 움직이고 게임 불가" 이후 전면 개정):
+ * **루틴 전투는 화면을 흔들지 않는다.** 무기 발사·명중·잡졸 폭발은 흔들림 0 이다 —
+ * 초당 수십 번 일어나는 일이 화면을 밀면 그건 손맛이 아니라 멀미다.
+ * 흔들림은 세리머니(보스 등장·진화·죽음)와 피격(정보)의 것이고, 그마저 상한이 있다.
  */
 import type { View } from './batch'
 import { Rng } from './rng'
@@ -28,8 +31,11 @@ export class Camera {
 
   /** 흔들림을 건다. 이미 흔들리는 중이면 더 센 쪽이 이긴다 (누적하면 화면이 미쳐 날뛴다). */
   shake(amplitude: number, decay = 9): void {
-    if (amplitude > this.shakeAmp) {
-      this.shakeAmp = amplitude
+    // 절대 상한 9px — 어떤 세리머니도 화면을 이 이상 밀지 못한다.
+    // 상한이 없던 시절 죽음(26)·보스(18)가 화면을 통째로 내던졌다.
+    const amp = Math.min(9, amplitude)
+    if (amp > this.shakeAmp) {
+      this.shakeAmp = amp
       this.shakeDecay = decay
     }
   }

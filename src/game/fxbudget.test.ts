@@ -188,4 +188,33 @@ describe('이펙트 광량 예산', () => {
     expect(m.p95, '대역 중심 광량 p95').toBeLessThanOrEqual(1.0)
     expect(m.p50, '대역 중심 광량 p50').toBeGreaterThanOrEqual(0.08)
   })
+
+  it('평시 전투는 화면을 거의 흔들지 않는다', () => {
+    // 4차 실플레이 보고 "화면 움직이고 게임 불가"의 자물쇠. 진화 6무기가 40초 동안
+    // 쉬지 않고 쏘고 수천 마리를 죽여도, 셰이크는 세리머니(포식·비트 예고)의
+    // 몫이어야 한다. 예전엔 발사마다 화면을 밀어 총량이 수천이었다.
+    const g = worstCase()
+    const shakes: number[] = []
+    const orig = g.camera.shake.bind(g.camera)
+    g.camera.shake = (a: number, d?: number) => {
+      shakes.push(a)
+      orig(a, d)
+    }
+    const spawnRng = new Rng(99)
+    const input = { move: { x: 0, y: 0 } } as unknown as Input
+    refill(g, spawnRng, 2600)
+    for (let s = 0; s < 40 * 60; s++) {
+      if (g.phase === Phase.LevelUp) {
+        g.choose(g.pendingChoices[0]!)
+        continue
+      }
+      if (g.phase !== Phase.Playing) break
+      g.player.hp = g.player.stats.maxHp
+      g.update(input, 1 / 60)
+      if (s % 60 === 0) refill(g, spawnRng, 2600)
+    }
+    const total = shakes.reduce((s, v) => s + v, 0)
+    console.log(`[fxbudget/셰이크] 40초 호출 ${shakes.length}회, 진폭 합 ${total.toFixed(0)}`)
+    expect(total, '평시 40초 셰이크 진폭 총량').toBeLessThan(60)
+  })
 })

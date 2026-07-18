@@ -307,7 +307,7 @@ export class Game implements FireCtx {
     const f = this.feeding()
     if (f && !this.feedingNow) {
       this.sfx('boom')
-      this.camera.shake(8, 6)
+      this.camera.shake(4, 6)
     }
     if (!f && this.feedingNow) {
       // 포식이 끝났다 — 삼킨 물질이 원반에 파편으로 맺힌다. 재보급이 강하 사이클의
@@ -440,15 +440,15 @@ export class Game implements FireCtx {
       this.pactHeal *= d.heal
       this.sfx('evolve')
       shockwave(this.motes, this.player.x, this.player.y, 340, EVENT * 0.9, 0.32, 0.4, 1.0)
-      this.camera.shake(10, 8)
+      this.camera.shake(6, 8)
     }
     if (choice.kind === 'evolve') {
       // 진화는 이 게임에서 가장 귀한 순간이라 유일하게 EVENT 밝기를 쓴다. 1초 미만.
       this.sfx('evolve')
       const k = EVENT
       shockwave(this.motes, this.player.x, this.player.y, 220, choice.r * k, choice.g * k, choice.b * k, 0.9)
-      burst(this.motes, this.player.x, this.player.y, 60, choice.r * k, choice.g * k, choice.b * k, 460, 1.0, 8, Shape.Star)
-      this.camera.shake(14, 8)
+      burst(this.motes, this.player.x, this.player.y, 40, choice.r * k, choice.g * k, choice.b * k, 460, 1.0, 8, Shape.Star)
+      this.camera.shake(8, 8)
     }
     this.pendingLevels--
     if (this.pendingLevels > 0) {
@@ -564,7 +564,7 @@ export class Game implements FireCtx {
         p.y += ty * f
       }
       if (pd < hr && p.hurt(16)) {
-        this.camera.shake(10, 9)
+        this.camera.shake(5, 9)
         this.sfx('hurt')
       }
     }
@@ -628,7 +628,9 @@ export class Game implements FireCtx {
           // 반동은 그 복권을 해소하려고 도입한 보편 장치다 — 한 눈금 더 준다.
           this.pushFoes(this.player.x, this.player.y, 132, 390)
         }
-        this.camera.shake(9, 12)
+        // 셰이크 없음 — 후반엔 피격이 예외가 아니라 일상이다(bloom.ts 의 통찰).
+        // 0.4초마다 화면을 밀면 그건 신호가 아니라 상시 진동이다. 피격 신호는
+        // 테두리 플래시와 심박 비네트가 담당한다.
         this.sfx('hurt')
       }
     }
@@ -753,7 +755,7 @@ export class Game implements FireCtx {
       if (this.boss.idx < 0) this.boss.reset()
       // 막이 바뀌는 순간이 곧 이정표다 — 화면과 소리가 같이 알려야 한다
       shockwave(this.motes, this.player.x, this.player.y, 420, EVENT * 0.7, EVENT * 0.6, 0.8, 1.4)
-      this.camera.shake(10, 5)
+      this.camera.shake(6, 5)
       this.sfx('levelup')
       // 막의 계약 — 새 막은 조건을 걸고 시작한다. 거절은 없다: 계약이 곧 막이다.
       // 셋 다 득실이 함께라 "내 빌드에 맞는 위험 고르기"가 된다 (acts.ts PACTS).
@@ -821,7 +823,7 @@ export class Game implements FireCtx {
         shockwave(this.motes, boss.ringX, boss.ringY, 170, 1.7, 0.45, 0.2, 0.6)
         const pd = Math.hypot(this.player.x - boss.ringX, this.player.y - boss.ringY)
         if (pd < 150 && this.player.hurt(26)) {
-          this.camera.shake(11, 9)
+          this.camera.shake(6, 9)
           this.sfx('hurt')
         }
       }
@@ -838,7 +840,7 @@ export class Game implements FireCtx {
           break
         }
         case BossState.Charge:
-          this.camera.shake(7, 10)
+          this.camera.shake(4, 10)
           this.sfx('nova')
           break
         case BossState.Stagger:
@@ -898,7 +900,7 @@ export class Game implements FireCtx {
         boss.ringR = Math.max(0, boss.ringR - 210 * dt)
         const pd = Math.hypot(this.player.x - boss.ringX, this.player.y - boss.ringY)
         if (boss.collapseArmed() && pd < boss.ringR && this.player.hurt(11)) {
-          this.camera.shake(9, 10)
+          this.camera.shake(5, 10)
           this.sfx('hurt')
         }
         break
@@ -946,8 +948,8 @@ export class Game implements FireCtx {
     this.boss.spawn(i, this.foes.hp[i]!, this.foes.stamp[i]!)
     // 보스는 화면에서 즉시 구분돼야 한다
     shockwave(this.motes, this.foes.x[i]!, this.foes.y[i]!, 260, EVENT * 0.8, 0.4, 0.6, 1.2)
-    burst(this.motes, this.foes.x[i]!, this.foes.y[i]!, 34, EVENT * 0.8, 0.5, 0.7, 400, 1.0, 9, Shape.Crown)
-    this.camera.shake(18, 6)
+    burst(this.motes, this.foes.x[i]!, this.foes.y[i]!, 24, EVENT * 0.8, 0.5, 0.7, 400, 1.0, 9, Shape.Crown)
+    this.camera.shake(9, 6)
     this.sfx('evolve')
   }
 
@@ -1006,7 +1008,7 @@ export class Game implements FireCtx {
     const hx = this.player.x + Math.cos(bearing) * 540
     const hy = this.player.y + Math.sin(bearing) * 540
     shockwave(this.motes, hx, hy, 300, 1.5, 0.55, 0.25, 1.0)
-    this.camera.shake(5, 10)
+    this.camera.shake(3, 10)
     this.sfx('bolt')
     this.beatName = beat.name
     this.beatIntro = 2.2
@@ -1206,8 +1208,8 @@ export class Game implements FireCtx {
     // 회복도 하나. 잔해가 곧 보급이라 "파러 갈 이유"가 XP 하나로는 약하다.
     if (this.drops.spawn(x, y, 0, 0, 28, Drop.Heal) < 0) this.player.heal(28)
     shockwave(this.motes, x, y, 120, EVENT * 0.6, EVENT * 0.5, 0.4, 0.7)
-    burst(this.motes, x, y, 16, 1.6, 1.4, 0.5, 260, 0.7, 6, Shape.Star)
-    this.camera.shake(6, 12)
+    burst(this.motes, x, y, 12, 1.6, 1.4, 0.5, 260, 0.7, 6, Shape.Star)
+    this.camera.shake(3, 12)
     this.sfx('levelup')
   }
 
@@ -1237,7 +1239,7 @@ export class Game implements FireCtx {
           const blast = power * (2.5 + f.charge[i]! * 0.02)
           this.explode(x, y, r * 1.5, blast, 1.6, 0.35, 2.9)
           this.sfx('bigKill')
-          this.camera.shake(16, 8)
+          // 셰이크 없음 — 특이점 붕괴는 빌드에 따라 수 초마다 온다 (루틴이다)
         } else if (kind === Field.Echo) {
           // 이 반향이 죽인 적은 다음 세대 반향을 낳는다 — 세대가 필드에 실려야
           // 스택을 넘어 살아남는다.
@@ -1383,7 +1385,7 @@ export class Game implements FireCtx {
     }
     this.echoGen = prevGen
     shockwave(this.motes, x, y, radius, cr, cg, cb, 0.4)
-    burst(this.motes, x, y, 6, cr, cg, cb, radius * 2.4, 0.35, 4)
+    burst(this.motes, x, y, 3, cr, cg, cb, radius * 2.4, 0.35, 4)
   }
 
   private updateShots(dt: number): void {
@@ -1417,10 +1419,7 @@ export class Game implements FireCtx {
         } else {
           const broke = this.terrain.damageAt(x, y, shots.damage[i]! * 1.6, this.elapsed)
           smoke(this.motes, x, y, broke ? 3 : 1, 0.3, 0.24, 0.2, broke ? 12 : 7)
-          if (broke) {
-            this.camera.shake(1.6, 20)
-            this.reapCache(x, y)
-          }
+          if (broke) this.reapCache(x, y)
           shots.kill(i)
           continue
         }
@@ -1454,7 +1453,6 @@ export class Game implements FireCtx {
           const br = shots.radius[i]! * 5.5 * s2.blast
           this.explode(x, y, br, shots.damage[i]! * 1.4, 2.6, 1.3, 0.5)
           this.breakTerrain(x, y, br * 0.6, 60)
-          this.camera.shake(9, 10)
           this.sfx('bigKill')
           shots.kill(i)
           break
@@ -1541,7 +1539,7 @@ export class Game implements FireCtx {
     const big = stat.radius > 16
     // 후반엔 초당 수백 마리가 죽는다. 개당 파티클이 많으면 화면이 파티클로 뒤덮여
     // 정작 적이 안 보인다 — 잔챙이는 조각 몇 개면 충분하다.
-    const n = big ? 9 : 3
+    const n = big ? 5 : 2
     const k = FX_BASE
     burst(this.motes, x, y, n, stat.r * k, stat.g * k, stat.b * k, 190, 0.26, 3.4)
     if (big) shockwave(this.motes, x, y, stat.radius * 2.2, stat.r * k, stat.g * k, stat.b * k, 0.3)
@@ -1709,7 +1707,7 @@ export class Game implements FireCtx {
           this.sfx('pickup')
         } else if (type === Drop.Heal) {
           p.heal(drops.value[i]!)
-          shockwave(this.motes, p.x, p.y, 40, 0.25, 1.4, 0.6, 0.35)
+          // 연출 없음 — 회복 픽업은 잦다. 체력바가 오르는 것이 연출이다.
         } else if (type === Drop.Vacuum) {
           // 성흔 발동 — 맵의 모든 경험치가 날아온다
           this.vacuumOut = 0
@@ -1717,7 +1715,7 @@ export class Game implements FireCtx {
             if (drops.alive[k] === 1 && drops.type[k] === Drop.Xp) drops.pulled[k] = 2
           }
           shockwave(this.motes, p.x, p.y, 920, EVENT * 0.9, EVENT * 0.6, EVENT * 1.1, 1.2)
-          this.camera.shake(13, 7)
+          this.camera.shake(7, 7)
           this.sfx('evolve')
         }
         drops.kill(i)
@@ -1731,8 +1729,8 @@ export class Game implements FireCtx {
       this.loadout.recomputeStats(p)
       this.pendingChoices = this.loadout.roll(this.rng, 3, p.stats.awaken)
       shockwave(this.motes, p.x, p.y, 70, 1.6, 1.35, 0.5, 0.5)
-      burst(this.motes, p.x, p.y, 18, 1.6, 1.3, 0.45, 300, 0.6, 5, Shape.Star)
-      this.camera.shake(5, 14)
+      burst(this.motes, p.x, p.y, 10, 1.6, 1.3, 0.45, 300, 0.6, 5, Shape.Star)
+      // 셰이크 없음 — 레벨업은 분당 여러 번이다 (루틴)
       this.sfx('levelup')
     }
   }
@@ -1741,9 +1739,9 @@ export class Game implements FireCtx {
     this.phase = Phase.Dead
     this.sfx('death')
     // 죽는 순간은 세리머니다 — 여기선 밝아도 된다 (게임이 끝났으니 가릴 것도 없다)
-    burst(this.motes, this.player.x, this.player.y, 70, EVENT, 0.5, 0.3, 420, 1.2, 9)
+    burst(this.motes, this.player.x, this.player.y, 50, EVENT, 0.5, 0.3, 420, 1.2, 9)
     shockwave(this.motes, this.player.x, this.player.y, 180, EVENT, 0.4, 0.3, 0.9)
-    this.camera.shake(26, 5)
+    this.camera.shake(9, 5)
   }
 
   // ── 렌더 ─────────────────────────────────────────────────────────────
@@ -1767,11 +1765,12 @@ export class Game implements FireCtx {
     /**
      * 프레임 내 누진 브레이크 — 지난 프레임 장부만 보면 폭발이 터진 **그 프레임**은
      * 무방비다(1프레임 지연 스파이크, 실측 p95 1.36). 같은 프레임 안에서 누적 수요가
-     * 무릎(0.4)을 넘는 순간부터 이후 쿼드를 제곱으로 조인다. 제곱 감쇠의 적분은
-     * 수렴하므로 **fx 층 총량이 수학적으로 유계다**: 0.4 + 1/2.2 ≈ 0.85.
+     * 무릎(0.3)을 넘는 순간부터 이후 쿼드를 제곱으로 조인다. 제곱 감쇠의 적분은
+     * 수렴하므로 **fx 층 총량이 수학적으로 유계다**: 0.3 + 1/2.6 ≈ 0.68
+     * (4차 감광에서 0.85 → 0.68 로 더 조였다).
      * 수요가 무한대여도 그 위로 못 간다 — 화이트아웃이 산수로 불가능해진다.
      */
-    const brake = 1 + Math.max(0, this.fxAcc - 0.4) * 2.2
+    const brake = 1 + Math.max(0, this.fxAcc - 0.3) * 2.6
     const c = conserve(size, sp) * dim / (brake * brake)
     b.push(x, y, size, rot, r * c, g * c, bl * c, a, shape)
   }
@@ -1793,7 +1792,7 @@ export class Game implements FireCtx {
     const fxLoad = Math.min(1, this.motes.count / 14000 + this.shots.count / 2800)
     // over 는 bloom(calm)에만 쓴다 — fx 쿼드 자체는 pushFx 의 프레임 내 브레이크가
     // 지연 없이 조이므로, 여기서 또 곱하면 이중 처벌로 이펙트가 실종된다.
-    const over = Math.max(0, this.fxLumPrev - 0.45)
+    const over = Math.max(0, this.fxLumPrev - 0.34)
     const fxDim = 1 - 0.5 * fxLoad
     const hitDim = Math.min(1, 48 / Math.max(1, this.flashPrev))
     // 군체 밀도 감광 — 최악 프레임 계측에서 화면을 태운 건 이펙트가 아니라 **적 몸
@@ -1897,7 +1896,7 @@ export class Game implements FireCtx {
     // 곧 물리다). pushFx 경유라 광량 예산·보존 감광을 그대로 받는다.
     {
       const hr2 = this.holeR()
-      for (let k = 0; k < 128; k++) {
+      for (let k = 0; k < 84; k++) {
         const fr = hr2 * (DISK_IN + (DISK_OUT - DISK_IN) * ((k * 0.61803) % 1))
         const fb = diskBandAt(fr, hr2)
         if (fb <= 0.05) continue
@@ -1907,9 +1906,10 @@ export class Game implements FireCtx {
         const fdx = fx0 - cx
         const fdy = fy0 - cy
         if (fdx * fdx + fdy * fdy > cullR2) continue
+        // 어둡게 — 조류는 "느껴지는 배경"이지 광원이 아니다 (4차 감광)
         this.pushFx(
-          b, cullR, fx0, fy0, 26 + fb * 22, ang + Math.PI * 0.5,
-          0.5 * fb, 0.36 * fb, 0.18 * fb, 0.5, Shape.Spark, fxDim,
+          b, cullR, fx0, fy0, 24 + fb * 18, ang + Math.PI * 0.5,
+          0.34 * fb, 0.25 * fb, 0.12 * fb, 0.45, Shape.Spark, fxDim,
         )
       }
     }
@@ -1955,9 +1955,9 @@ export class Game implements FireCtx {
       // 초당 수천 번 터져서 화면이 하얘진다 — ACCENT 안에서만 놀고, 붐비면 더 줄인다.
       // hitDim: 광역기가 수백 마리를 **동시에** 칠 때는 동시 점화 수 자체를 조인다.
       if (flash > 0) flashCount++
-      // 배율 3.5 → 2.4: hitDim 은 지난 프레임 기준이라 광역기 일제 명중의 **첫**
-      // 프레임은 무방비다 — 베이스 자체가 그 한 프레임을 버틸 수 있어야 한다.
-      const hit = flash > 0 ? 1 + flash * (ACCENT * 2.4) * fxDim * hitDim : 1
+      // 배율 3.5 → 2.4 → 1.7 (실플레이 4차 보고): 플래시는 "맞았다"만 전하면 된다.
+      // hitDim 은 지난 프레임 기준이라 일제 명중 첫 프레임은 베이스가 버텨야 한다.
+      const hit = flash > 0 ? 1 + flash * (ACCENT * 1.7) * fxDim * hitDim : 1
       const hpFrac = foes.hp[i]! / foes.maxHp[i]!
       // 피가 닳으면 어두워진다 — 체력바 없이 상태를 읽게
       const dim = 0.45 + hpFrac * 0.55
@@ -2111,11 +2111,11 @@ export class Game implements FireCtx {
       // 광륜(느린 회전) + 씨앗 코어(빠른 역회전) + 십자 섬광. 셋 다 다른 속도로 돌아서
       // 정적인 적 무리 속에서 유일하게 "살아 있는" 것으로 읽힌다.
       // 유사 3D: 이동 중 살짝 떠오르고(hop), 그림자는 지면에 남는다 — 접지감의 핵심
-      const hop = Math.abs(p.vx) + Math.abs(p.vy) > 20 ? Math.abs(Math.sin(t * 11)) * 5 : 0
+      const hop = Math.abs(p.vx) + Math.abs(p.vy) > 20 ? Math.abs(Math.sin(t * 11)) * 3 : 0
       renderer.shadows.push(p.x, p.y - 13, 30, 0, 0, 0, 0.05, 0.5, Shape.Orb)
       const py = p.y + hop
-      // 광륜이 심장박동에 맞춰 살짝 부푼다 — 내 몸이 메트로놈이다
-      b.push(p.x, py, 42 * (1 + 0.12 * barEnv), t * 0.5, 0.5 * inv, 0.85 * inv, 1.7 * inv, 1, Shape.Halo)
+      // 광륜이 심장박동에 맞춰 살짝 부푼다 — 내 몸이 메트로놈이다 (0.12→0.06: 절제)
+      b.push(p.x, py, 42 * (1 + 0.06 * barEnv), t * 0.5, 0.5 * inv, 0.85 * inv, 1.7 * inv, 1, Shape.Halo)
       b.push(p.x, py, 26, -t * 1.4, PLAYER_BASE * inv, PLAYER_BASE * 0.85 * inv, PLAYER_BASE * 1.2 * inv, 1, Shape.Seed)
       b.push(p.x, py, 15, t * 3.1, PLAYER_BASE * 1.3 * inv, PLAYER_BASE * 1.3 * inv, PLAYER_BASE * 1.3 * inv, 1, Shape.Nova)
 

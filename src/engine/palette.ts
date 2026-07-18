@@ -40,7 +40,7 @@ export const EVENT = 3.0
  * 파티클 밝기. 후반에 수천 개가 겹치므로 개당은 아주 어두워야 한다 —
  * 이게 누적돼 화면을 태웠다.
  */
-export const FX_BASE = 0.5
+export const FX_BASE = 0.38
 
 /** 지속 효과체(필드). 바닥에 깔린 것이라 적보다 어둡다. */
 export const FIELD_BASE = 0.42
