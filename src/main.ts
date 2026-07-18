@@ -81,8 +81,9 @@ function boot(): void {
     }
     line('포식 명부', 'font-size:28px;letter-spacing:.3em;color:#ffd9a8;margin-bottom:6px')
     line(
-      `삼킨 것 ${game.journal.length} · 반지름 ${Math.round(game.radius)} · ` +
-      `가장 큰 한 입 ${game.biggestMeal} · 가장 먼 항해 ${Math.round(game.farthest).toLocaleString()}`,
+      `${game.voyages}번째 항해 · 명부 ${game.journal.length} · 이번 판 ${game.eatenThisRun} · ` +
+      `최고 반지름 ${game.bestR} · 가장 큰 한 입 ${game.biggestMeal} · ` +
+      `가장 먼 항해 ${Math.round(game.farthest).toLocaleString()}`,
       'font-size:12px;color:#7d90a8;margin-bottom:20px',
     )
     if (game.journal.length === 0) {
@@ -124,14 +125,14 @@ function boot(): void {
     line('검은 입', 'font-size:56px;letter-spacing:.5em;color:#ffd9a8')
     line('너는 티끌만 한 블랙홀이다', 'margin-top:16px;font-size:14px;color:#8fa8c4;line-height:2')
     line('삼키면 커지고, 커지면 어제 못 삼키던 것을 삼킨다', 'font-size:14px;color:#ffb066;line-height:2')
-    line('티끌 → 혜성 → 행성 → 태양 → 그리고 은하의 심장까지', 'font-size:14px;color:#8fa8c4;line-height:2')
-    line('멀리 갈수록 크다 · 너와 같은 것들도 있다 — 너보다 크면 조심하라', 'font-size:13px;color:#6f8299;line-height:2;margin-top:14px')
-    line('삼킨 것은 이름과 함께 명부에 영원히 남는다', 'font-size:13px;color:#6f8299;line-height:2')
+    line('네가 지나가면 달이 뜯기고, 행성이 흩어지고, 시공이 휜다', 'font-size:14px;color:#8fa8c4;line-height:2')
+    line('삼키기엔 큰 것은 — 바짝 붙어 조석으로 찢어라', 'font-size:13px;color:#6f8299;line-height:2;margin-top:14px')
+    line('너와 같은 것들도 있다 — 너보다 크면 조심하라', 'font-size:13px;color:#6f8299;line-height:2')
     line('이동 WASD · 마우스 홀드 · 터치  |  J 명부 · M 소리', 'font-size:13px;color:#6f8299;line-height:2')
-    line('아무 키나 눌러 눈을 뜬다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
+    line('아무 키나 눌러 눈을 뜬다 — 항해는 언제나 티끌에서 시작한다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
     if (game.journal.length > 0) {
       line(
-        `— 이어서: ${rankOf(game.radius)} · 삼킨 것 ${game.journal.length} —`,
+        `— ${game.voyages}번째 항해 · 명부 ${game.journal.length} · 최고 ${rankOf(game.bestR)} —`,
         'margin-top:10px;font-size:12px;color:#7d90a8',
       )
     }
@@ -196,7 +197,7 @@ function boot(): void {
 
     coords.textContent =
       `${rankOf(game.radius)}  ·  r${Math.round(game.radius)}\n` +
-      `(${Math.round(game.x)}, ${Math.round(game.y)})  ·  삼킨 것 ${game.journal.length}`
+      `(${Math.round(game.x)}, ${Math.round(game.y)})  ·  이번 항해 ${game.eatenThisRun} · 명부 ${game.journal.length}`
 
     input.endFrame()
     requestAnimationFrame(frame)

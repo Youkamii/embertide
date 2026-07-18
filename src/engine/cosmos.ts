@@ -30,6 +30,7 @@ uniform vec3 u_tintA;    // 성운 색 A (막마다 바뀐다)
 uniform vec3 u_tintB;    // 성운 색 B
 uniform float u_intensity; // 0..1 — 후반일수록 성운이 타오른다
 uniform float u_hole;    // 사건의 지평선 반지름 (월드 px). 0 = 블랙홀 없음
+uniform vec2 u_holeC;    // 블랙홀 중심 (월드 좌표) — 검은 입에선 플레이어 자신이다
 uniform float u_beat;    // 0..1 심장박동 엔벨로프 — 광자 고리·원반이 뛴다
 uniform float u_feed;    // 0..1 포식 강도 — 원반이 타오른다
 uniform float u_diskIn;  // 원반 대역 안쪽 반지름 (월드 px) — acts.DISK_IN 이 단일 진실
@@ -95,10 +96,11 @@ void main() {
 
   vec3 col = vec3(0.006, 0.008, 0.018);
 
-  // ── 블랙홀 기하. 세계 중심 (0,0)이 특이점이다.
+  // ── 블랙홀 기하 — 특이점은 u_holeC, 즉 나 자신이다. 내가 가는 곳마다 시공이 휜다.
   float hr = u_hole;
-  float wr = length(world);
-  vec2 wdir = wr > 1.0 ? world / wr : vec2(0.0, 1.0);
+  vec2 rel = world - u_holeC;
+  float wr = length(rel);
+  vec2 wdir = wr > 1.0 ? rel / wr : vec2(0.0, 1.0);
   // 중력 렌즈: 별밭 샘플 좌표를 지평선 쪽으로 당긴다 — 배경 전체가 구멍 둘레로 휜다.
   // 슈바르츠실트의 흉내(편향 ∝ 1/충돌거리)면 충분하다. 성운은 화면 좌표라 제외.
   float defl = hr > 1.0 ? (hr * hr * 1.6) / max(wr - hr * 0.35, hr * 0.45) : 0.0;
@@ -122,15 +124,6 @@ void main() {
   float holes = smoothstep(0.28, 0.62, n2);
   float neb = density * (0.35 + holes * 0.65);
   vec3 nebCol = mix(u_tintA, u_tintB, clamp(n2 * 1.3, 0.0, 1.0));
-  // 구역 팔레트 — 원반 밖은 불모의 진공. 성운의 채도를 죽여 "가치의 지리"를
-  // 색으로 말한다: 색이 있는 곳에 부가 있다. 경계는 유니폼(acts 데이터)이 정한다.
-  if (hr > 1.0) {
-    // 1.25배까지 짧게 — 완만(1.5배)하면 헐값 구역(4hr)이 아직 유채색이라
-    // "색을 믿고 남은" 플레이어가 가난한 데서 사냥한다 (적대 리뷰).
-    float barren = smoothstep(u_diskOut, u_diskOut * 1.25, wr);
-    vec3 nebGray = vec3(dot(nebCol, vec3(0.299, 0.587, 0.114)));
-    nebCol = mix(nebCol, nebGray * 0.5, barren * 0.78);
-  }
   col += nebCol * neb * (0.16 + u_intensity * 0.34);
 
   // 성운 속 밝은 심(seam) — 필라멘트 가장자리가 빛난다
@@ -155,7 +148,7 @@ void main() {
     // "저 강물 안이 부자 동네"가 화면에서 읽힌다. 경계는 유니폼(acts 데이터)이 정한다.
     float diskT = (wr - u_diskIn) / max(1.0, u_diskOut - u_diskIn);
     if (diskT < 1.15 && wr > hr * 0.5) {
-      float ang = atan(world.y, world.x);
+      float ang = atan(rel.y, rel.x);
       float dT = max(diskT, 0.0);
       float swirl = ang + u_time * 0.4 / (0.22 + dT) + dT * 6.0;
       float bands = fbm(vec2(swirl * 1.35, dT * 9.0), 4);
@@ -191,6 +184,9 @@ export class Cosmos {
   intensity = 0
   /** 사건의 지평선 반지름(월드 px). 게임이 매 프레임 넣는다. 0 = 없음 */
   holeR = 0
+  /** 블랙홀 중심 (월드 좌표) — 검은 입에선 플레이어 위치. 렌즈·원반·지평선이 따라온다 */
+  holeX = 0
+  holeY = 0
   /** 0..1 심장박동 엔벨로프 — R3(리듬)가 넣는다 */
   beat = 0
   /** 0..1 포식 강도 — 원반이 타오르고 고리가 조인다 */
@@ -218,6 +214,7 @@ export class Cosmos {
     gl.uniform3f(this.prog.uniforms['u_tintB']!, this.tintB[0], this.tintB[1], this.tintB[2])
     gl.uniform1f(this.prog.uniforms['u_intensity']!, this.intensity)
     gl.uniform1f(this.prog.uniforms['u_hole']!, this.holeR)
+    gl.uniform2f(this.prog.uniforms['u_holeC']!, this.holeX, this.holeY)
     gl.uniform1f(this.prog.uniforms['u_beat']!, this.beat)
     gl.uniform1f(this.prog.uniforms['u_feed']!, this.feed)
     gl.uniform1f(this.prog.uniforms['u_diskIn']!, this.diskIn)
