@@ -12,8 +12,19 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
+import { hashSeed } from '../engine/rng'
 import { LY, STAR_MAP } from '../game/starmap'
 import { BodyKind, type Voyage } from '../game/voyage'
+
+/** 행성 대기 림 색 — 대기 조성이 곧 색이다 */
+const EARTH_ID = hashSeed('sol:지구')
+const ATMOS = new Map<number, readonly [number, number, number]>([
+  [EARTH_ID, [0.35, 0.65, 1.2]],
+  [hashSeed('sol:금성'), [1.1, 0.95, 0.6]],
+  [hashSeed('sol:화성'), [0.9, 0.5, 0.35]],
+  [hashSeed('sol:천왕성'), [0.45, 1.0, 1.0]],
+  [hashSeed('sol:해왕성'), [0.4, 0.6, 1.2]],
+])
 
 const MAX_INST = 2600
 const MAX_GLOW = 160
@@ -27,28 +38,51 @@ const LENS_SHADER = {
     uHole: { value: new THREE.Vector2(0.5, 0.5) },
     uR: { value: 0.05 },
     uAspect: { value: 1.77 },
+    uWaveC: { value: new THREE.Vector2(0.5, 0.5) },
+    uWaveT: { value: 9 },
+    uQuasar: { value: 0 },
   },
   vertexShader: `varying vec2 vUv;
 void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
   fragmentShader: `varying vec2 vUv;
 uniform sampler2D tDiffuse; uniform vec2 uHole; uniform float uR; uniform float uAspect;
+uniform vec2 uWaveC; uniform float uWaveT; uniform float uQuasar;
 void main(){
   vec2 p = vUv - uHole; p.x *= uAspect;
   float d = length(p);
   vec2 dir = d > 1e-4 ? p / d : vec2(0.0,1.0);
-  float defl = (uR*uR*1.6) / max(d - uR*0.3, uR*0.4);
-  vec2 uv = vUv + vec2(dir.x/uAspect, dir.y) * defl;
-  vec3 col = texture2D(tDiffuse, uv).rgb;
+  // 렌즈 방정식 β = θ − α — 배경은 바깥으로 밀리고, 정렬되면 아인슈타인 링이 맺힌다.
+  // (예전엔 부호가 반대라 빨아들이는 발산 렌즈였다 — 링이 원리적으로 불가능했다)
+  float defl = (uR*uR*1.6) / max(d, uR*0.4);
+  float b = d - defl;
+  vec2 q = uHole + vec2(dir.x/uAspect, dir.y) * b;
+  q = clamp(q, vec2(0.0), vec2(1.0));
+  vec3 col = texture2D(tDiffuse, q).rgb;
+  // 렌즈 배율 — 링 근처의 배경은 실제로 밝아진다 (마이크로렌징)
+  float mag = clamp(d / max(abs(b), 2e-3), 1.0, 4.0);
+  col *= mix(1.0, mag, 0.55);
+  // 중력파 — 시공의 물결이 화면을 실제로 출렁이며 지나간다 (합병의 흔적)
+  if (uWaveT < 1.6) {
+    vec2 pw = vUv - uWaveC; pw.x *= uAspect;
+    float dw = length(pw);
+    float band = exp(-pow((dw - uWaveT*0.55)/0.03, 2.0));
+    vec2 qw = vUv + (pw/max(dw,1e-4)) * band * 0.016 * (1.0-uWaveT/1.6);
+    col = max(col, texture2D(tDiffuse, qw).rgb);
+    col += vec3(0.35,0.4,0.7) * band * (1.0-uWaveT/1.6) * 0.35;
+  }
+  // 중력 적색편이 — 지평선 근처를 빠져나온 빛은 붉고 어둡다
+  float gz = sqrt(clamp(1.0 - uR*0.92/max(d,1e-3), 0.0, 1.0));
+  float zone = 1.0 - smoothstep(uR*1.05, uR*3.0, d);
+  col = mix(col, col * max(gz, 0.15) * vec3(1.0,0.6,0.4), zone*0.8);
   // 사건의 지평선 — 렌즈 다음에 깎아야 진짜 검다
   col = mix(col, vec3(0.0), smoothstep(uR*1.02, uR*0.88, d));
-  // 광자 고리
-  // 광자 고리 — EHT 스타일 이중 고리 + 도플러 비대칭(다가오는 쪽이 밝다)
+  // 광자 고리 — 임계곡선으로 수렴하는 서브링들 + 도플러 비대칭 (EHT)
   float angH = atan(p.y, p.x);
   float dopp = 1.0 + 0.55 * sin(angH);
-  float ring = exp(-abs(d - uR*1.06)/(uR*0.05));
-  float subring = exp(-abs(d - uR*1.18)/(uR*0.022));
-  col += vec3(1.4,1.05,0.6) * ring * 0.5 * dopp;
-  col += vec3(1.2,0.95,0.7) * subring * 0.22 * dopp;
+  float hot = 1.0 + uQuasar * 1.2;
+  float ring1 = exp(-pow((d - uR*1.10)/(uR*0.035), 2.0));
+  float ring2 = exp(-pow((d - uR*1.03)/(uR*0.013), 2.0));
+  col += vec3(1.5,1.1,0.65) * (ring1*0.55 + ring2*0.4) * dopp * hot;
   gl_FragColor = vec4(col, 1.0);
 }`,
 }
@@ -90,18 +124,21 @@ function smokeTexture(): THREE.Texture {
   return new THREE.CanvasTexture(c)
 }
 
-function diskTexture(): THREE.Texture {
-  // RingGeometry 의 UV 는 평면 좌표 — **방사형** 그라디언트여야 원반으로 매핑된다
-  // (선형을 쓰면 지름 방향으로 쓸리는 조악한 얼룩이 된다: 실플레이 "조악해"의 범인)
+function ringTexture(): THREE.Texture {
+  // 행성 고리 — 방사형 밴드 + 카시니 간극 두 줄 (미마스 공명이 비운 자리)
   const c = document.createElement('canvas')
   c.width = c.height = 256
   const ctx = c.getContext('2d')!
-  const g = ctx.createRadialGradient(128, 128, 40, 128, 128, 128)
-  g.addColorStop(0, 'rgba(255,255,255,0)')
-  g.addColorStop(0.34, 'rgba(255,244,220,0.95)') // 안쪽 백열 — 가장 뜨겁다
-  g.addColorStop(0.5, 'rgba(255,170,80,0.7)')
-  g.addColorStop(0.75, 'rgba(210,90,140,0.3)')
-  g.addColorStop(1, 'rgba(120,60,160,0)')
+  const g = ctx.createRadialGradient(128, 128, 62, 128, 128, 126)
+  g.addColorStop(0, 'rgba(0,0,0,0)')
+  g.addColorStop(0.1, 'rgba(220,205,170,0.75)')
+  g.addColorStop(0.42, 'rgba(200,185,150,0.65)')
+  g.addColorStop(0.47, 'rgba(60,55,45,0.08)') // 카시니 간극
+  g.addColorStop(0.52, 'rgba(210,195,160,0.6)')
+  g.addColorStop(0.78, 'rgba(180,165,135,0.45)')
+  g.addColorStop(0.82, 'rgba(60,55,45,0.06)') // 엥케 간극
+  g.addColorStop(0.86, 'rgba(170,155,130,0.35)')
+  g.addColorStop(1, 'rgba(0,0,0,0)')
   ctx.fillStyle = g
   ctx.fillRect(0, 0, 256, 256)
   return new THREE.CanvasTexture(c)
@@ -115,6 +152,7 @@ export class Scene3D {
   readonly camera: THREE.PerspectiveCamera
   private readonly composer: EffectComposer
   private readonly lensPass: ShaderPass
+  private readonly bloom: UnrealBloomPass
 
   /** 카메라 방위각 — 오른쪽 드래그로 돈다. 이동(WASD)은 이 기준으로 변환된다 */
   yaw = 0
@@ -125,6 +163,7 @@ export class Scene3D {
   private readonly emis: THREE.InstancedMesh
   /** 은하화된 별들 — 나를 도는 나의 은하 */
   private readonly haloMesh: THREE.InstancedMesh
+  private readonly rings: THREE.Mesh[] = []
   private readonly glows: THREE.Sprite[] = []
   private readonly gasSprites: THREE.Sprite[] = []
   private readonly marks: THREE.Sprite[] = []
@@ -133,6 +172,8 @@ export class Scene3D {
   private readonly mergeGlow: THREE.Sprite
   private readonly waves: THREE.Mesh[] = []
   private readonly disk: THREE.Mesh
+  private readonly diskMat: THREE.ShaderMaterial
+  private readonly jets: THREE.Mesh[] = []
   private readonly stars: THREE.Points
   private readonly sun: THREE.DirectionalLight
   private readonly rivalMeshes: THREE.Mesh[] = []
@@ -184,6 +225,17 @@ export class Scene3D {
     this.haloMesh = new THREE.InstancedMesh(sphere, new THREE.MeshBasicMaterial(), 400)
     this.haloMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
     this.scene.add(this.haloMesh)
+    // 행성 고리 풀 — 토성이 드디어 고리를 되찾는다
+    const ringGeo = new THREE.RingGeometry(1.3, 2.5, 56)
+    const ringTex = ringTexture()
+    for (let i = 0; i < 10; i++) {
+      const rm = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
+        map: ringTex, transparent: true, side: THREE.DoubleSide, depthWrite: false,
+      }))
+      rm.visible = false
+      this.rings.push(rm)
+      this.scene.add(rm)
+    }
 
     for (let i = 0; i < MAX_GLOW; i++) {
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -236,15 +288,43 @@ export class Scene3D {
       this.waves.push(wv)
       this.scene.add(wv)
     }
-    this.disk = new THREE.Mesh(
-      new THREE.RingGeometry(1.35, 3.1, 72),
-      new THREE.MeshBasicMaterial({
-        map: diskTexture(), blending: THREE.AdditiveBlending, transparent: true,
-        side: THREE.DoubleSide, depthWrite: false,
-      }),
-    )
+    // 강착원반 — 샤쿠라-순야예프 온도 구배(T∝r^-¾: 안쪽 백청, 바깥 적색) +
+    // 케플러 차등 회전(안쪽이 빠르다) + 도플러 비밍(다가오는 쪽이 밝다) + 난류 줄무늬
+    this.diskMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uFeed: { value: 0 } },
+      vertexShader: `varying vec2 vP;
+void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+      fragmentShader: `varying vec2 vP;
+uniform float uTime; uniform float uFeed;
+void main(){
+  float r = length(vP);
+  float T = pow(1.35/r, 0.75);
+  vec3 col = mix(vec3(1.0,0.36,0.12), vec3(1.15,1.3,1.55), smoothstep(0.55,1.0,T));
+  float phi = atan(vP.y,vP.x) - uTime*1.7*inversesqrt(r*r*r);
+  float beam = pow(1.0 + 0.4*sin(atan(vP.y,vP.x))/sqrt(r), 3.0);
+  float streak = 0.72 + 0.28*sin(phi*9.0 + r*14.0);
+  float alpha = (1.0-smoothstep(1.4,3.1,r)) * smoothstep(1.32,1.5,r) * (0.3+uFeed*0.6);
+  gl_FragColor = vec4(col*beam*streak, alpha);
+}`,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+    this.disk = new THREE.Mesh(new THREE.RingGeometry(1.35, 3.1, 72), this.diskMat)
     this.disk.rotation.x = -Math.PI / 2
     this.scene.add(this.disk)
+    // 상대론적 쌍제트 — 퀘이사 모드에서 스핀축(위아래)으로 뿜는 빛기둥
+    const coneGeo = new THREE.ConeGeometry(0.45, 4, 20, 1, true)
+    for (const s of [1, -1]) {
+      const jet = new THREE.Mesh(coneGeo, new THREE.MeshBasicMaterial({
+        color: 0x9fc4ff, blending: THREE.AdditiveBlending, transparent: true,
+        opacity: 0, depthWrite: false, side: THREE.DoubleSide,
+      }))
+      jet.rotation.x = s > 0 ? Math.PI : 0
+      this.jets.push(jet)
+      this.scene.add(jet)
+    }
 
     // 황도 기준면 — 수직 이동이 "보이게" 하는 유일한 잣대. 별은 무한원경이라
     // z 로 움직여도 아무 시차가 없다 (실플레이 "z축 못 움직여"의 정체).
@@ -337,10 +417,12 @@ export class Scene3D {
 
     this.composer = new EffectComposer(this.renderer)
     this.composer.addPass(new RenderPass(this.scene, this.camera))
-    const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.75, 0.7, 0.78)
-    this.composer.addPass(bloom)
+    // 렌즈 → 블룸 순서 — 블룸은 카메라 광학이라 렌즈 뒤가 물리적으로 맞고,
+    // 광자 고리가 블룸을 받아 그림자 가장자리로 번진다 (EHT·인터스텔라 룩)
     this.lensPass = new ShaderPass(LENS_SHADER)
     this.composer.addPass(this.lensPass)
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.75, 0.7, 0.78)
+    this.composer.addPass(this.bloom)
 
     // 카메라 조작 — 왼쪽 드래그 회전(증분·포인터 ID 단일 핸들러), 휠 줌.
     // 클로저 누적 방식은 포인터업을 놓치면 죽은 핸들러가 남아 yaw 가 두 기준
@@ -461,6 +543,7 @@ export class Scene3D {
     let emisN = 0
     let glowN = 0
     let markN = 0
+    let ringN = 0
     for (const b of g.active) {
       if (b.kind === BodyKind.Sun) {
         const d = (b.x - g.x) ** 2 + (b.y - g.y) ** 2
@@ -485,11 +568,12 @@ export class Scene3D {
       const bx = b.x
       const by = b.z
       const bz = b.y
-      // 흡수 중이면 나선으로 감기며 줄어든다
+      // 흡수 중이면 나선으로 감기며 줄어들고, 지평선 앞에서 붉게 저물다 얼어붙는다
       let sc = b.r
       let ax = bx
       let ay = by
       let az = bz
+      let redK = 0
       for (let i = 0; i < g.absorbs.length; i++) {
         const a = g.absorbs[i]!
         if (a.b.id === b.id) {
@@ -500,6 +584,7 @@ export class Scene3D {
           az = pz + Math.sin(ang) * d0
           ay = by + (py - by) * k
           sc = b.r * (1 - k * 0.62)
+          redK = k
           break
         }
       }
@@ -509,29 +594,81 @@ export class Scene3D {
       const isEmis = b.kind === BodyKind.Sun || b.hot
       if (isEmis && emisN < 600) {
         this.emis.setMatrixAt(emisN, this.m4)
-        this.col.setRGB(Math.min(1, b.cr), Math.min(1, b.cg), Math.min(1, b.cb))
+        // 맥동 변광·대류 얼룩 — 별은 숨쉰다: 미라형(크고 붉으면 깊고 느리게),
+        // 케페이드형(작으면 얕고 빠르게), 초거성은 표면이 얼룩덜룩 끓는다
+        const ph = (b.id % 628) * 0.01
+        const red = b.cr > b.cb * 1.2
+        const amp = b.r > 900 ? 0.22 : red && b.r > 300 ? 0.3 : 0.08
+        const spd = b.r > 300 ? 0.35 : 1.4
+        const pulse = 1 + amp * Math.sin(t * spd + ph)
+        const mottle = b.r > 900 ? 0.85 + 0.15 * Math.sin(t * 2.3 + ph * 7) * Math.sin(t * 1.1 + ph * 3) : 1
+        this.col.setRGB(
+          Math.min(1, b.cr * pulse * mottle * (1 + redK * 0.6)),
+          Math.min(1, b.cg * pulse * (1 - redK * 0.6)),
+          Math.min(1, b.cb * mottle * (1 - redK * 0.8)),
+        )
         this.emis.setColorAt(emisN, this.col)
         emisN++
         if (b.kind === BodyKind.Sun && glowN < MAX_GLOW - 1) {
-          // 이중 후광 — 바깥 색 코로나 + 안쪽 백열 코어 (사진 속 별처럼)
           const sp = this.glows[glowN++]!
           sp.visible = true
           sp.position.set(ax, ay, az)
-          sp.scale.setScalar(sc * 7)
-          sp.material.color.setRGB(b.cr * 0.6, b.cg * 0.5, b.cb * 0.3)
+          sp.scale.setScalar(sc * 7 * pulse)
+          sp.material.color.setRGB(b.cr * 0.6 * mottle, b.cg * 0.5, b.cb * 0.3)
           sp.material.opacity = 0.7
           const core = this.glows[glowN++]!
           core.visible = true
           core.position.set(ax, ay, az)
-          core.scale.setScalar(sc * 2.6)
+          core.scale.setScalar(sc * 2.6 * pulse)
           core.material.color.setRGB(1.4, 1.3, 1.1)
           core.material.opacity = 0.85
         }
       } else if (litN < MAX_INST) {
         this.lit.setMatrixAt(litN, this.m4)
-        this.col.setRGB(Math.min(1, b.cr), Math.min(1, b.cg), Math.min(1, b.cb))
+        this.col.setRGB(
+          Math.min(1, b.cr * (1 + redK * 0.8)),
+          Math.min(1, b.cg * (1 - redK * 0.7)),
+          Math.min(1, b.cb * (1 - redK * 0.9)),
+        )
         this.lit.setColorAt(litN, this.col)
         litN++
+        // 행성 대기 림 — 대기 조성이 곧 색이다 (지구 청색, 금성 황백, 천왕성 청록…)
+        const rim = ATMOS.get(b.id)
+        if (rim && glowN < MAX_GLOW - 1) {
+          const sp = this.glows[glowN++]!
+          sp.visible = true
+          sp.position.set(ax, ay, az)
+          sp.scale.setScalar(sc * 2.6)
+          sp.material.color.setRGB(rim[0], rim[1], rim[2])
+          sp.material.opacity = 0.4
+          if (b.id === EARTH_ID) {
+            // 오로라 — 태양풍이 극에 쏟아진다
+            const au = this.glows[glowN++]!
+            au.visible = true
+            au.position.set(ax, ay + sc * 1.05, az)
+            au.scale.setScalar(sc * 1.1 * (1 + 0.2 * Math.sin(t * 3)))
+            au.material.color.setRGB(0.3, 1.1, 0.5)
+            au.material.opacity = 0.5
+          }
+        }
+        // 혜성 머리 — 코마의 빛
+        if (b.kind === BodyKind.Comet && glowN < MAX_GLOW) {
+          const sp = this.glows[glowN++]!
+          sp.visible = true
+          sp.position.set(ax, ay, az)
+          sp.scale.setScalar(sc * 4)
+          sp.material.color.setRGB(0.7, 0.85, 1.1)
+          sp.material.opacity = 0.55
+        }
+        // 고리 행성 — 토성의 고리가 드디어 3D 로 (카시니 간극 포함)
+        if (b.kind === BodyKind.Ringed && ringN < this.rings.length) {
+          const rm = this.rings[ringN++]!
+          rm.visible = true
+          rm.position.set(ax, ay, az)
+          rm.scale.setScalar(sc)
+          rm.rotation.x = -Math.PI / 2 + ((b.id % 100) - 50) * 0.006
+          ;(rm.material as THREE.MeshBasicMaterial).opacity = 0.85
+        }
       }
       // 성운·은하심 — 큰 연기 후광
       if ((b.kind === BodyKind.Garden || b.kind === BodyKind.Core) && glowN < MAX_GLOW) {
@@ -562,6 +699,7 @@ export class Scene3D {
     if (this.emis.instanceColor) this.emis.instanceColor.needsUpdate = true
     for (let i = glowN; i < MAX_GLOW; i++) this.glows[i]!.visible = false
     for (let i = markN; i < MAX_MARK; i++) this.marks[i]!.visible = false
+    for (let i = ringN; i < this.rings.length; i++) this.rings[i]!.visible = false
 
     // 가스 — 구름·연기
     const gas = (g as unknown as { gas: { x: number; y: number; z: number; life: number; max: number; size: number; cr: number; cg: number; cb: number }[] }).gas
@@ -614,8 +752,10 @@ export class Scene3D {
     for (const h of g.halo) {
       if (haloN >= 400) break
       const rr = h.k * R
-      const ca = Math.cos(h.ang)
-      const sa = Math.sin(h.ang)
+      // 나선팔 밀도파 — 원반 별은 두 로그나선 팔 근처에 군집한다 (린-샤우)
+      const spiral = h.tier === 1 ? h.arm * Math.PI + Math.log(h.k / 2.2) * 2.4 : 0
+      const ca = Math.cos(h.ang + spiral)
+      const sa = Math.sin(h.ang + spiral)
       this.v3.set(
         px + ca * rr,
         py + sa * rr * Math.sin(h.inc),
@@ -624,7 +764,16 @@ export class Scene3D {
       this.s3.setScalar(Math.max(h.size, R * 0.02))
       this.m4.compose(this.v3, this.q0, this.s3)
       this.haloMesh.setMatrixAt(haloN, this.m4)
-      this.col.setRGB(Math.min(1, h.cr), Math.min(1, h.cg), Math.min(1, h.cb))
+      // 별의 나이 — 갓 태어난 별은 청백색, 60초에 걸쳐 식는다. 팽대부는 늙고 붉다
+      const youth = Math.max(0, 1 - h.age / 60)
+      let hr = h.cr * (1 - youth * 0.25)
+      let hg = h.cg
+      let hb = Math.min(1.3, h.cb + youth * 0.5)
+      if (h.tier === 0) {
+        hr = Math.min(1.2, hr + 0.3)
+        hb *= 0.6
+      }
+      this.col.setRGB(Math.min(1, hr), Math.min(1, hg), Math.min(1, hb))
       this.haloMesh.setColorAt(haloN, this.col)
       haloN++
     }
@@ -665,13 +814,21 @@ export class Scene3D {
       }
     }
 
-    // 나 + 원반
+    // 나 + 원반 + 제트
     this.playerMesh.position.set(px, py, pz)
     this.playerMesh.scale.setScalar(R)
     this.disk.position.set(px, py, pz)
     this.disk.scale.setScalar(R)
-    this.disk.rotation.z = t * 0.5
-    ;(this.disk.material as THREE.MeshBasicMaterial).opacity = 0.22 + g.feed * 0.5
+    this.diskMat.uniforms['uTime']!.value = t
+    this.diskMat.uniforms['uFeed']!.value = Math.min(1, g.feed + g.quasar * 0.7)
+    for (let i = 0; i < this.jets.length; i++) {
+      const jet = this.jets[i]!
+      const s = i === 0 ? 1 : -1
+      const power = g.quasar
+      jet.position.set(px, py + s * R * 2.6 * Math.max(0.3, power), pz)
+      jet.scale.set(R * (0.5 + power), R * (0.6 + power * 2.2), R * (0.5 + power))
+      ;(jet.material as THREE.MeshBasicMaterial).opacity = power * 0.5
+    }
 
     // 렌즈 — 내 화면 위치와 화면 반지름
     this.v3.set(px, py, pz).project(this.camera)
@@ -682,6 +839,17 @@ export class Scene3D {
     // 렌즈는 존재 증명이되 화면을 먹으면 안 된다 — 실크기 기준, 바닥만 살짝
     this.lensPass.uniforms['uR']!.value = Math.max(0.013, rScreen)
     this.lensPass.uniforms['uAspect']!.value = w / h
+    this.lensPass.uniforms['uQuasar']!.value = g.quasar
+    // 중력파 → 렌즈 물결
+    if (g.waveT < 1.6) {
+      this.v3.set(g.waveX, g.waveZ, g.waveY).project(this.camera)
+      this.lensPass.uniforms['uWaveC']!.value.set((this.v3.x + 1) / 2, (this.v3.y + 1) / 2)
+      this.lensPass.uniforms['uWaveT']!.value = this.v3.z < 1 ? g.waveT : 9
+    } else {
+      this.lensPass.uniforms['uWaveT']!.value = 9
+    }
+    // 퀘이사 점화 — 화면 전체가 뜨거워진다
+    this.bloom.strength = 0.75 + g.quasar * 0.9
   }
 
   render(): void {

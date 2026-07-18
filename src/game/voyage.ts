@@ -66,6 +66,8 @@ export interface Body {
   readonly kind: BodyKindType
   /** 반지름 — 접촉 잠식으로 깎일 수 있다 (블랙홀은 크기가 아니라 밀도다) */
   r: number
+  /** 태어날 때의 반지름 — 항성이 이것의 55% 밑으로 깎이면 별의 죽음이 온다 */
+  r0: number
   readonly cr: number
   readonly cg: number
   readonly cb: number
@@ -164,6 +166,12 @@ export interface HaloStar {
   cr: number
   cg: number
   cb: number
+  /** 나선팔 소속 (0/1) — 밀도파: 팔은 물질이 아니라 정체 구간이다 */
+  arm: number
+  /** 별 나이 (초) — 갓 태어난 별은 청백색, 늙으면 붉게 식는다 */
+  age: number
+  /** 0 팽대부(붉고 둥근 궤도) / 1 원반(얇고 젊다) / 2 헤일로(성긴 외곽) */
+  tier: number
 }
 
 /** 가스 입자 — 조석 스트림·TDE 분출·합병의 연기. 풀 고정, 프레임 할당 0. */
@@ -242,6 +250,10 @@ export class Voyage {
   private nibbleCd = 0
   private driftCd = 3
   private driftN = 0
+  /** 퀘이사 게이지 0..1 — 폭식이 이어지면 AGN 점화: 원반·블룸·제트가 타오른다 */
+  quasar = 0
+  private jetCd = 0
+  private cometCd = 0
   /** 나침반 대상 — 3D 렌더러(main)가 화면 화살표로 그린다 */
   preyX = 0
   preyY = 0
@@ -303,6 +315,9 @@ export class Voyage {
     this.nibbleCd = 0
     this.driftCd = 3
     this.driftN = 0
+    this.quasar = 0
+    this.jetCd = 0
+    this.cometCd = 0
     for (const g of this.gas) g.life = 0
     if (store) {
       try {
@@ -379,7 +394,7 @@ export class Voyage {
     cr: number, cg: number, cb: number,
   ): Body {
     return {
-      id, kind, r, cr, cg, cb, x, y, z: 0,
+      id, kind, r, r0: r, cr, cg, cb, x, y, z: 0,
       vx: 0, vy: 0, vz: 0, host: null, ax: 0, ay: 0, az: 0,
       orbR: 0, orbA: 0, orbW: 0, ecc: 0, inc: 0,
       free: false, hot: false,
@@ -436,6 +451,33 @@ export class Voyage {
         this.setOrbit(m, p, p.r * 2.3, 0, 1, 0, 0.09)
         registerName(mId, '달', '지구의 조석을 만들던 돌이었다.')
         list.push(m)
+      }
+      if (name === '목성') {
+        // 갈릴레이 위성 — 라플라스 공명 1:2:4 의 네 형제
+        const GAL: readonly [string, number, number, string][] = [
+          ['이오', 1.7, 1.9, '조석에 반죽되어 화산으로 끓던 위성.'],
+          ['유로파', 1.5, 2.4, '얼음 밑에 바다를 숨기고 있었다.'],
+          ['가니메데', 2.3, 3.0, '태양계에서 가장 큰 위성이었다.'],
+          ['칼리스토', 2.1, 3.7, '흉터로 뒤덮인 오래된 얼굴.'],
+        ]
+        for (const [gn, gr, gm, gl] of GAL) {
+          const gid = hashSeed(`sol:${gn}`)
+          const gb = this.newBody(gid, BodyKind.Dust, p.x, p.y, gr, 0.72, 0.68, 0.6)
+          this.setOrbit(gb, p, p.r * gm, (gid % 628) * 0.01, 1, 0, 0.02)
+          registerName(gid, gn, gl)
+          list.push(gb)
+        }
+        // 트로이 소행성 — 태양-목성 L4/L5, 목성과 영원히 60° 간격 동행
+        for (const side of [1, -1]) {
+          for (let ti = 0; ti < 6; ti++) {
+            const tid = hashSeed(`sol:trojan:${side}:${ti}`)
+            const tb = this.newBody(tid, BodyKind.Dust, sun.x, sun.y,
+              1.8 + ((tid >>> 4) % 100) * 0.012, 0.5, 0.47, 0.42)
+            this.setOrbit(tb, sun, sun.r * orbMul,
+              p.orbA + side * (Math.PI / 3) + (((tid >>> 6) % 40) - 20) * 0.006, 1, 0, 0.03)
+            list.push(tb)
+          }
+        }
       }
     }
     // 소행성대 — 화성과 목성 사이, 실제 그 자리. 첫째 알갱이는 세레스다.
@@ -966,6 +1008,11 @@ export class Voyage {
         b.r = Math.cbrt(Math.max(1, b.r * b.r * b.r - bite))
         this.streamIn += bite * ABSORB_GAIN
         this.feed = Math.max(this.feed, 0.25 + strength * 0.5)
+        // 별의 죽음 — 항성을 임계까지 뜯으면 조용히 안 죽는다 (초신성/행성상성운)
+        if (b.kind === BodyKind.Sun && b.r < b.r0 * 0.55 && b.r0 > 40) {
+          this.stellarDeath(b)
+          continue
+        }
         if (this.nibbleCd <= 0) {
           this.nibbleCd = 0.11
           // 가스는 내 쪽으로 뜯겨 나와 접선으로 감긴다 — 빙빙 도는 강착류
@@ -1035,18 +1082,7 @@ export class Voyage {
             this.eaten.add(b.id)
             const idx2 = this.active.indexOf(b)
             if (idx2 >= 0) this.active.splice(idx2, 1)
-            const h = b.id >>> 0
-            const k = 2.2 + (h % 1000) * 0.0048 // 2.2R ~ 7R
-            this.halo.push({
-              k,
-              ang: (h % 628) * 0.01,
-              w: (0.55 + ((h >>> 10) % 100) * 0.004) / Math.sqrt(k), // 케플러: 안쪽이 빠르다
-              inc: (((h >>> 5) % 100) * 0.01 - 0.5) * 0.4,
-              size: b.r,
-              cr: Math.min(1.2, b.cr * 1.2),
-              cg: Math.min(1.1, b.cg * 1.1),
-              cb: b.cb,
-            })
+            this.captureStar(b.id >>> 0, b.r, b.cr, b.cg, b.cb, 0)
             continue
           }
           this.absorbs.push({ b, t: 0, dur: 0.22 + Math.min(0.35, (b.r / R) * 0.4) })
@@ -1131,8 +1167,54 @@ export class Voyage {
     this.feed = Math.max(0, this.feed - step * 0.8)
     this.waveT += step
 
-    // 은하 공전 — 포획된 별들은 나를 영원히 돈다
-    for (const h of this.halo) h.ang += h.w * step
+    // 은하 공전 — 포획된 별들은 나를 영원히 돌고, 세월에 따라 식는다
+    for (const h of this.halo) {
+      h.ang += h.w * step
+      h.age += step
+    }
+
+    // ── 퀘이사 게이지 — 에딩턴급 폭식이 이어지면 AGN 이 점화된다
+    if (this.streamIn > this.vol * 0.04 || this.feed > 0.85) {
+      this.quasar = Math.min(1, this.quasar + step * 0.55)
+    } else {
+      this.quasar = Math.max(0, this.quasar - step * 0.28)
+    }
+    // 상대론적 쌍제트 — 스핀축(z)으로 플라즈마를 뿜는다 (M87)
+    this.jetCd -= step
+    if (this.quasar > 0.3 && this.jetCd <= 0) {
+      this.jetCd = 0.09
+      const jv = 400 + R * 8
+      for (const s of [1, -1]) {
+        this.spawnGas(
+          this.x + (Math.sin(this.visualTime * 7) * R) * 0.3, this.y, this.z + s * R * 1.2,
+          this.vx * 0.5, this.vy * 0.5, s * jv,
+          Math.max(5, R * 0.3), 0.75, 0.9, 1.4, 1.3,
+        )
+      }
+    }
+
+    // 혜성 이중 꼬리 — 이온(반태양 청색)·먼지(궤도 뒤 황백). 가까운 것만
+    this.cometCd -= step
+    if (this.cometCd <= 0) {
+      this.cometCd = 0.22
+      const near = base * 2.5
+      for (const b of this.active) {
+        if (b.kind !== BodyKind.Comet) continue
+        const d = Math.hypot(b.x - this.x, b.y - this.y)
+        if (d > near) continue
+        let ax = -b.vx
+        let ay = -b.vy
+        if (b.host && b.host.kind === BodyKind.Sun) {
+          ax = b.x - b.host.x
+          ay = b.y - b.host.y
+        }
+        const al = Math.hypot(ax, ay) || 1
+        this.spawnGas(b.x, b.y, b.z, (ax / al) * 160 + b.vx * 0.3, (ay / al) * 160 + b.vy * 0.3,
+          0, b.r * 0.9, 0.45, 0.6, 1.1, 1.1) // 이온 꼬리 — 정확히 반태양
+        this.spawnGas(b.x, b.y, b.z, -b.vx * 0.35, -b.vy * 0.35, 0,
+          b.r * 1.1, 0.8, 0.72, 0.5, 1.5) // 먼지 꼬리 — 궤도 뒤로 처진다
+      }
+    }
 
     // ── 나선낙하 → 합병 — 각속도가 폭주하며 감아 돌다 하나가 된다 (LIGO 처프)
     if (this.merging) {
@@ -1170,6 +1252,11 @@ export class Voyage {
           this.spawnGas(this.x, this.y, this.z,
             Math.cos(a) * rr * 3, Math.sin(a) * rr * 3, ((g % 3) - 1) * rr,
             rr * 0.5, 0.5, 0.35, 0.6, 1.4)
+        }
+        // 합병 후 스타버스트 — 충돌 압축이 젊은 별들을 낳는다 (안테나 은하)
+        this.quasar = 1
+        for (let sb = 0; sb < 7; sb++) {
+          this.captureStar(hashSeed(`sb:${this.eatCount}:${sb}`), 2 + (sb % 3), 0.75, 0.9, 1.35, 0)
         }
         this.merging = null
         this.sfx('bigKill')
@@ -1412,6 +1499,105 @@ export class Voyage {
       this.dirty = true
     }
     this.sfx('kill')
+  }
+
+  /**
+   * 은하에 별 하나 — 3성분 구조(실제 은하처럼): 안쪽은 붉은 팽대부(둥근 궤도),
+   * 중간은 얇고 젊은 원반(나선팔 소속), 바깥은 성긴 헤일로. age 0 = 갓 태어난 청백색.
+   */
+  private captureStar(h: number, size: number, cr: number, cg: number, cb: number, age: number): void {
+    if (this.halo.length >= 380) return
+    const k = 2.2 + (h % 1000) * 0.0048 // 2.2R ~ 7R
+    const tier = k < 3.2 ? 0 : k < 5.6 ? 1 : 2
+    this.halo.push({
+      k,
+      ang: (h % 628) * 0.01,
+      w: (0.55 + ((h >>> 10) % 100) * 0.004) / Math.sqrt(k), // 케플러: 안쪽이 빠르다
+      inc:
+        tier === 0
+          ? (((h >>> 5) % 100) * 0.01 - 0.5) * 1.6 // 팽대부 — 통통한 회전 타원체
+          : tier === 1
+            ? (((h >>> 5) % 100) * 0.01 - 0.5) * 0.1 // 원반 — 얇다
+            : (((h >>> 5) % 100) * 0.01 - 0.5) * 0.9, // 헤일로 — 제멋대로
+      size,
+      cr: Math.min(1.2, cr * 1.2),
+      cg: Math.min(1.1, cg * 1.1),
+      cb,
+      arm: h % 2,
+      age,
+      tier,
+    })
+  }
+
+  /**
+   * 별의 죽음 — 잠식으로 임계(원래 크기의 55%)를 넘긴 항성은 조용히 줄지 않는다.
+   * 큰 별(r0>260)은 II형 초신성: 충격파 + 파편 성찬. 중간 별은 행성상성운:
+   * 껍질을 벗고 백색왜성 심만 남긴다. 실제 항성 진화의 갈림길 그대로.
+   */
+  private stellarDeath(b: Body): void {
+    this.eaten.add(b.id)
+    const idx = this.active.indexOf(b)
+    if (idx >= 0) this.active.splice(idx, 1)
+    const nova = b.r0 > 260
+    for (let i = 0; i < (nova ? 22 : 14); i++) {
+      const a = (i / (nova ? 22 : 14)) * Math.PI * 2
+      const sp = nova ? 260 + b.r0 * 0.8 : 120 + b.r0 * 0.4
+      this.spawnGas(
+        b.x + Math.cos(a) * b.r, b.y + Math.sin(a) * b.r, b.z,
+        Math.cos(a) * sp + b.vx, Math.sin(a) * sp + b.vy, ((i % 3) - 1) * sp * 0.3,
+        b.r0 * (nova ? 0.2 : 0.14),
+        nova ? 1.5 : 1.1, nova ? 1.2 : 0.9, nova ? 0.9 : 1.0, 1.8,
+      )
+    }
+    this.spawnDeathCores(b, nova)
+    this.waveX = b.x
+    this.waveY = b.y
+    this.waveZ = b.z
+    this.waveT = 0
+    this.feed = 1
+    this.streamIn += b.r * b.r * b.r * 0.4 * ABSORB_GAIN
+    this.camera.shake(nova ? 7 : 4, 7)
+    const entry: JournalEntry = {
+      name: `${this.nameBody(b).name} — ${nova ? '초신성' : '행성상성운'}`,
+      log: nova ? '별이 무너지며 제 살을 우주에 돌려주었다.' : '껍질을 벗고 하얀 심만 남았다.',
+      kind: b.kind,
+      r: Math.round(b.r0),
+      x: Math.round(b.x),
+      y: Math.round(b.y),
+    }
+    this.journal.push(entry)
+    this.lastFound = entry
+    this.persistSoon()
+    this.sfx('nova')
+  }
+
+  /** 별 죽음의 잔해 — 초신성은 파편 다발, 행성상성운은 백색왜성 심 하나. */
+  private spawnDeathCores(b: Body, nova: boolean): void {
+    if (this.active.length > 1200) return
+    const sx = Math.floor(b.x / SECTOR)
+    const sy = Math.floor(b.y / SECTOR)
+    const list = this.sectorBodies(sx, sy)
+    const n = nova ? 7 : 1
+    for (let i = 0; i < n; i++) {
+      const dSeed = hashSeed(`${b.id}:sn:${i}`)
+      if (this.eaten.has(dSeed)) continue
+      const a = (i / n) * Math.PI * 2 + (dSeed % 100) * 0.01
+      const pr = nova
+        ? Math.max(3, Math.min(this.radius * 0.5, b.r0 * 0.06 + ((dSeed >>> 5) % 20) * 0.2))
+        : Math.max(4, Math.min(this.radius * 0.6, b.r0 * 0.1))
+      const d = this.newBody(dSeed, BodyKind.Dust,
+        b.x + Math.cos(a) * b.r * 0.8, b.y + Math.sin(a) * b.r * 0.8, pr,
+        nova ? 1.3 : 1.5, nova ? 1.1 : 1.45, nova ? 0.8 : 1.4)
+      d.z = b.z
+      d.free = true
+      d.hot = true
+      const sp = nova ? 200 + b.r0 * 0.5 : 40
+      d.vx = Math.cos(a) * sp + b.vx
+      d.vy = Math.sin(a) * sp + b.vy
+      d.vz = b.vz
+      list.push(d)
+      this.active.push(d)
+    }
   }
 
   /** 조석 파괴의 심 — 2개. 최소 크기는 내 몸 상대(≤0.35R): 연쇄 파쇄 방지. */
