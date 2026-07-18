@@ -22,7 +22,7 @@ import type { Input } from '../engine/input'
 import type { Renderer } from '../engine/renderer'
 import { Rng, hashSeed } from '../engine/rng'
 import { Shape } from '../engine/shapes'
-import { starLog, starName } from './starnames'
+import { nameOf, realName, registerName, starLog, starName, type RealName } from './starnames'
 
 /** 우주 시드 — 상수다. 모두가 같은 우주를 삼켜야 좌표 공유가 성립한다. */
 export const UNIVERSE_SEED = 20260718
@@ -62,6 +62,7 @@ export const BodyKind = {
   Sun: 3, // 항성 — 행성계의 앵커. 한때는 나를 내던지던 것
   Garden: 4, // 성운 정원
   Core: 5, // 은하심(銀河心) — 아주 멀리서만. 최후의 식사
+  Rock: 6, // 민무늬 행성 — 고리 없는 세계 (지구·화성 같은)
 } as const
 export type BodyKindType = (typeof BodyKind)[keyof typeof BodyKind]
 
@@ -122,6 +123,16 @@ export function rankOf(radius: number): string {
   let name = RANKS[0]!.name
   for (const rk of RANKS) if (radius >= rk.r) name = rk.name
   return name
+}
+
+/**
+ * 추진 가속 — 카메라가 반지름에 비례해 물러나므로(줌아웃 ∝ R) 가속도 세계
+ * 스케일을 따라 커져야 **화면 기준** 속도가 유지된다. 상수 가속이던 시절엔
+ * 커질수록 화면 속도가 무너져 "너무 무거워서 못 움직이는" 몸이 됐다 (실플레이).
+ * 지수 0.85: 완전 비례보다 살짝 아래 — 은하급의 묵직함은 남긴다.
+ */
+function thrustAcc(radius: number): number {
+  return 456 * Math.pow(Math.max(950, radius * 26) / 950, 0.85)
 }
 
 /**
@@ -291,6 +302,21 @@ export class Voyage {
     this.persist()
   }
 
+  /** 밖(main)에서 페이지를 떠날 때 부른다 — 배치 저장의 마지막 조각을 흘리지 않게 */
+  flush(): void {
+    if (this.dirty) this.persist()
+  }
+
+  /**
+   * 부드러운 저장 — 쿨다운이 지났으면 즉시, 아니면 배치에 얹는다.
+   * 거대 스케일에선 모든 먹이가 "이름 있는 것"이라, 이름 즉시-저장 정책이
+   * 매 삼킴 동기 직렬화로 되살아나 게임이 멈춰 보였다 (실플레이 프리즈).
+   */
+  private persistSoon(): void {
+    this.dirty = true
+    if (this.persistCd <= 0) this.persist()
+  }
+
   private persist(): void {
     this.dirty = false
     this.persistCd = 1.2
@@ -346,6 +372,58 @@ export class Voyage {
     b.vy = Math.cos(orbA) * tv
   }
 
+  /**
+   * 태양계 — 우주의 시작점은 우리 집이다 ("우주 지도 참조해서 현실 반영": 사용자).
+   * 실제 순서·실제 이름·게임화된 상대 크기. 등급 사다리와 맞물린다:
+   * 첫 끼니는 명왕성·달, 지구는 「검은 입」(R12) 문턱 무렵, 태양은 행성 사냥꾼 너머.
+   */
+  private buildSol(list: Body[]): void {
+    const sunId = hashSeed('sol:sun')
+    const sun = this.newBody(sunId, BodyKind.Sun, 800, 800, 90, 1.9, 1.5, 0.6)
+    registerName(sunId, '태양', '아침마다 너를 비추던 것이었다.')
+    list.push(sun)
+    const P: readonly [string, number, number, BodyKindType, string, number, number, number][] = [
+      ['수성', 3.5, 1.7, BodyKind.Rock, '태양에 데인 돌이었다.', 0.6, 0.55, 0.5],
+      ['금성', 8.7, 2.2, BodyKind.Rock, '샛별이라 불리던 것이었다.', 0.95, 0.85, 0.6],
+      ['지구', 9.2, 2.75, BodyKind.Rock, '네가 태어난 곳이었다.', 0.35, 0.6, 0.95],
+      ['화성', 4.9, 3.4, BodyKind.Rock, '누군가 끝내 가보고 싶어 했다.', 0.9, 0.45, 0.3],
+      ['목성', 32, 5.2, BodyKind.Ringed, '행성들의 왕이었다.', 0.85, 0.7, 0.5],
+      ['토성', 27, 6.6, BodyKind.Ringed, '고리마저 삼켰다.', 0.9, 0.8, 0.55],
+      ['천왕성', 13, 8.1, BodyKind.Rock, '옆으로 누워 돌던 얼음이었다.', 0.6, 0.85, 0.9],
+      ['해왕성', 12.5, 9.5, BodyKind.Rock, '가장 푸른 바람이 불던 곳.', 0.4, 0.55, 1.0],
+      ['명왕성', 2.2, 11.4, BodyKind.Rock, '끝내 행성이 아니었던 것.', 0.7, 0.65, 0.6],
+    ]
+    for (const [name, r, orbMul, kind, log, cr, cg, cb] of P) {
+      const id = hashSeed(`sol:${name}`)
+      const p = this.newBody(id, kind, sun.x, sun.y, r, cr, cg, cb)
+      this.setOrbit(p, sun, sun.r * orbMul, (id % 628) * 0.01, 1)
+      registerName(id, name, log)
+      list.push(p)
+      if (name === '지구') {
+        const mId = hashSeed('sol:moon')
+        const m = this.newBody(mId, BodyKind.Dust, p.x, p.y, 2.5, 0.7, 0.7, 0.72)
+        this.setOrbit(m, p, p.r * 2.3, 0, 1)
+        registerName(mId, '달', '지구의 조석을 만들던 돌이었다.')
+        list.push(m)
+      }
+    }
+    // 소행성대 — 화성과 목성 사이, 실제 그 자리. 첫째 알갱이는 세레스다.
+    for (let i = 0; i < 13; i++) {
+      const id = hashSeed(`sol:belt:${i}`)
+      const d = this.newBody(id, BodyKind.Dust, sun.x, sun.y,
+        i === 0 ? 3.4 : 2.4 + ((id >>> 4) % 100) * 0.014, 0.55, 0.5, 0.45)
+      this.setOrbit(d, sun, sun.r * (4.1 + ((id >>> 6) % 100) * 0.006), (i / 13) * Math.PI * 2, 1)
+      if (i === 0) registerName(id, '세레스', '소행성대에서 가장 큰 돌이었다.')
+      list.push(d)
+    }
+    // 핼리 혜성 — 실제처럼 길쭉한 타원. 근일점에서 빨라진다.
+    const hId = hashSeed('sol:halley')
+    const h = this.newBody(hId, BodyKind.Comet, sun.x, sun.y, 5.5, 0.8, 0.9, 1.0)
+    this.setOrbit(h, sun, sun.r * 8, 2.2, 1, 0.72)
+    registerName(hId, '핼리 혜성', '76년마다 지구에 들르던 것이었다.')
+    list.push(h)
+  }
+
   private sectorBodies(sx: number, sy: number): Body[] {
     const key = `${sx},${sy}`
     let list = this.sectors.get(key)
@@ -356,6 +434,20 @@ export class Voyage {
     const dist = Math.hypot(sx, sy)
     /** 거리 눈금 — 천체 크기가 거리 따라 자란다. "더 큰 우주"는 항상 더 바깥에 있다. */
     const scale = 1 + dist * 0.55
+
+    // 시작 섹터는 절차 생성이 아니라 태양계다
+    if (sx === 0 && sy === 0) {
+      this.buildSol(list)
+      this.finishSector(key, list, rng, seed, sx, sy, dist, scale)
+      return list
+    }
+    // 궁수자리 A* — 우리 은하의 심장. 실제 하늘처럼 남쪽에, 고정 좌표로 박혀 있다.
+    if (sx === 0 && sy === -12) {
+      const id = hashSeed('sgrA')
+      const core = this.newBody(id, BodyKind.Core, 1200, sy * SECTOR + 1200, 4200, 1.2, 0.95, 1.4)
+      registerName(id, '궁수자리 A*', '우리 은하의 심장. 사백만 개의 태양이 뭉친 것.')
+      list.push(core)
+    }
 
     // ── 앵커 패스 — 계의 중심들
     const n = 3 + rng.int(3)
@@ -408,7 +500,9 @@ export class Voyage {
           const pSeed = hashSeed(`${host.id}:p:${i}`)
           const pr = host.r * (0.1 + rng.next() * 0.1)
           const orbR = host.r * (2.1 + i * 1.25 + rng.next() * 0.7)
-          const p = this.newBody(pSeed, BodyKind.Ringed, host.x, host.y, pr,
+          // 실제 하늘처럼 고리 있는 행성은 소수다
+          const pKind = rng.next() < 0.3 ? BodyKind.Ringed : BodyKind.Rock
+          const p = this.newBody(pSeed, pKind, host.x, host.y, pr,
             0.5 + rng.next() * 0.4, 0.45 + rng.next() * 0.3, 0.55 + rng.next() * 0.35)
           this.setOrbit(p, host, orbR, rng.next() * Math.PI * 2, rng.next() < 0.5 ? 1 : -1)
           list.push(p)
@@ -488,6 +582,15 @@ export class Voyage {
       }
     }
 
+    this.finishSector(key, list, rng, seed, sx, sy, dist, scale)
+    return list
+  }
+
+  /** 섹터 마감 — 부스러기 필드(공통 급식) + 캐시 등록 + 축출. */
+  private finishSector(
+    key: string, list: Body[], rng: Rng, seed: number,
+    sx: number, sy: number, dist: number, scale: number,
+  ): void {
     // ── 부스러기 필드 — 어디에나 있다. 크기는 거리 따라 자라므로 "내 다음 한 입"이
     // 항상 근처에 있다 (계측: 이게 없으면 60초짜리 기아 계곡이 생긴다). 요람은 더 후하게.
     const cradle = dist <= 1.5
@@ -511,7 +614,6 @@ export class Voyage {
         if (this.sectors.size <= 48) break
       }
     }
-    return list
   }
 
   /** 이 섹터의 결정론 라이벌 — 있으면 초기 상태를, 없으면 null. */
@@ -541,15 +643,19 @@ export class Voyage {
     this.activeKey = key
     // 이사 — 섹터 경계를 넘은 천체(끌려온 계·파편·이탈 위성)는 현재 위치의 섹터
     // 명단으로 옮긴다. 안 옮기면 탄생 섹터가 활성권을 벗어나는 순간 눈앞에서
-    // 증발한다 (적대 리뷰). 플레이어가 섹터를 넘을 때만 돌므로 싸다.
+    // 증발한다 (적대 리뷰). **이미 캐시된 명단으로만 옮긴다** — 여기서 섹터를
+    // 생성하면, 경계를 걸친 위성(태양계 명왕성이 확정 사례)이 이웃 생성 → 그 이웃의
+    // 위성이 또 이웃 생성… 우주 끝까지 기는 무한 크롤이 된다 (계측: 행 재현).
     for (const [k, lst] of this.sectors) {
       for (let i = lst.length - 1; i >= 0; i--) {
         const b = lst[i]!
-        const bsx = Math.floor(b.x / SECTOR)
-        const bsy = Math.floor(b.y / SECTOR)
-        if (`${bsx},${bsy}` !== k) {
-          lst.splice(i, 1)
-          this.sectorBodies(bsx, bsy).push(b)
+        const bk = `${Math.floor(b.x / SECTOR)},${Math.floor(b.y / SECTOR)}`
+        if (bk !== k) {
+          const target = this.sectors.get(bk)
+          if (target) {
+            lst.splice(i, 1)
+            target.push(b)
+          }
         }
       }
     }
@@ -583,13 +689,14 @@ export class Voyage {
     if (!Number.isFinite(this.vol) || this.vol < 1) this.vol = START_VOL
     const R = this.radius
 
-    // 추진 — 클수록 무겁다. 은하를 삼킨 것이 티끌처럼 촐싹거리면 거짓말이다.
+    // 추진 — 화면 눈금으로는 언제나 비슷하게 민첩하고, 절대 속도는 덩치 따라 커진다.
+    // 은하를 삼킨 것은 티끌보다 빠르되, 아주 조금 더 묵직하게 (thrustAcc 지수 0.85).
     const mx = input.move.x
     const my = input.move.y
     this.thrusting = mx !== 0 || my !== 0
     if (this.thrusting) {
       const ml = Math.hypot(mx, my) || 1
-      const acc = 460 / (1 + R / 220)
+      const acc = thrustAcc(R)
       this.vx += (mx / ml) * acc * step
       this.vy += (my / ml) * acc * step
       this.heading = Math.atan2(my, mx)
@@ -636,21 +743,29 @@ export class Voyage {
             // 섭동 — 내 중력이 궤도 결속을 넘으면 레일에서 뜯긴다 (Hills 방출)
             const bind = Math.abs(b.orbW * b.orbW * b.orbR)
             if (g > bind * DETACH) b.free = true
-          } else {
+          } else if (d > Math.max(2, R * 0.25)) {
+            // 중심 코앞(d≈0)은 건드리지 않는다 — 방향 기저가 퇴화해 속도를 지워버리고,
+            // 어차피 그 영역은 흡수 판정의 것이다.
             b.free = true // 내 손이 닿은 것은 자유체다 — 정지 티끌도 여기서 깨어난다
-            b.vx += (dx / d) * g * step
-            b.vy += (dy / d) * g * step
-            // 틀 끌림 — 낙하물은 곧장 떨어지지 않고 내 스핀 방향으로 감긴다
-            const fd = g * FRAME_DRAG * (R / (d + R))
-            b.vx += (-dy / d) * fd * step
-            b.vy += (dx / d) * fd * step
-            // 강착 점성 — 내 우물 깊이 들어온 것은 마찰로 감속해 나선으로 떨어진다.
-            // 이게 없으면 중력 산란이 먹이를 극초속으로 쏴 버린다 (계측: 5분에 1끼).
-            // 우주가 강착원반을 만드는 이유와 같다: 각운동량은 점성으로만 버려진다.
-            const prox = R / (d + R)
-            const visc = Math.exp(-step * 4 * prox * prox)
-            b.vx = this.vx + (b.vx - this.vx) * visc
-            b.vy = this.vy + (b.vy - this.vy) * visc
+            // 당김의 방향 분해 — 가까울수록 접선(틀 끌림) 비중이 커진다: 다이렉트로
+            // 떨어지지 않고 **빙글빙글 감기며** 강착원반을 이루다 흘러든다 (실플레이 판정).
+            const prox = R / (d + R) // 0(멀다) → 1(맞닿음)
+            const swirl = Math.min(0.86, FRAME_DRAG + prox * 0.8)
+            const gr = g * (1 - swirl * prox)
+            const gt = g * swirl
+            b.vx += ((dx / d) * gr + (-dy / d) * gt) * step
+            b.vy += ((dy / d) * gr + (dx / d) * gt) * step
+            // 원반화 점성 — **반경 방향 속도만** 죽인다. 궤도 회전은 남고 직진 낙하와
+            // 슬링샷 탈출만 사라진다 (전 속도 감쇠는 산란은 막았지만 회전까지 죽여
+            // 직선으로 툭 떨어져 보였다). 접선 성분은 아주 천천히 새어 나선이 좁혀진다.
+            const rvx = b.vx - this.vx
+            const rvy = b.vy - this.vy
+            const ux = dx / d
+            const uy = dy / d
+            const vr = (rvx * ux + rvy * uy) * Math.exp(-step * 5 * prox)
+            const vt = (-rvx * uy + rvy * ux) * Math.exp(-step * 0.7 * prox * prox)
+            b.vx = this.vx + ux * vr - uy * vt
+            b.vy = this.vy + uy * vr + ux * vt
           }
         }
       }
@@ -684,6 +799,14 @@ export class Voyage {
       this.vy += (dy / d) * g * step
     }
 
+    // 속도 상한 — 화면 1.9장/초. 없으면 거대 스케일에서 초당 수십 섹터를 관통하며
+    // 섹터 생성·이사 폭주로 게임이 멈춘다 (실플레이 프리즈). 슬링샷 탈출도 여기서 잡힌다.
+    const vmax = Math.max(950, R * 26) * 1.9
+    const sp0 = Math.hypot(this.vx, this.vy)
+    if (sp0 > vmax) {
+      this.vx *= vmax / sp0
+      this.vy *= vmax / sp0
+    }
     const prevX = this.x
     const prevY = this.y
     this.x += this.vx * step
@@ -754,9 +877,10 @@ export class Voyage {
       const dy = this.y - rv.y
       const d = Math.hypot(dx, dy) || 1
       const bigger = rr > R
-      if (d < 2400) {
+      if (d < 2400 + R * 8) {
+        // 라이벌도 같은 이동 눈금을 쓴다 — 아니면 커진 나를 아무도 못 쫓고 못 도망친다
         const dir = bigger ? 1 : -1
-        const acc = (bigger ? 200 : 250) / (1 + rr / 240)
+        const acc = thrustAcc(rr) * (bigger ? 0.44 : 0.55)
         rv.vx += (dx / d) * dir * acc * step
         rv.vy += (dy / d) * dir * acc * step
       }
@@ -780,8 +904,9 @@ export class Voyage {
           this.vol -= stolen
           rv.vol += stolen
           this.bittenCd = 2.5
-          this.vx += (dx / d) * 640
-          this.vy += (dy / d) * 640
+          const kb = thrustAcc(R) * 1.4 // 내던짐도 내 눈금으로 — 화면 기준 같은 충격
+          this.vx += (dx / d) * kb
+          this.vy += (dy / d) * kb
           this.camera.shake(6, 8)
           this.sfx('hurt')
         } else if (!bigger && rr < R * EDIBLE) {
@@ -791,9 +916,10 @@ export class Voyage {
           this.feed = 1
           if (rr > this.biggestMeal) this.biggestMeal = Math.round(rr)
           this.eaten.add(rv.id)
+          const rn = realName('hole', rv.id) // 실제 블랙홀의 이름 — 백조자리 X-1, 톤 618…
           const entry: JournalEntry = {
-            name: `${starName(rv.id)} — 다른 검은 입`,
-            log: '나와 같은 것이었다. 이제 나다.',
+            name: `${rn.name} — 다른 검은 입`,
+            log: rn.log,
             kind: BodyKind.Core,
             r: Math.round(rr),
             x: Math.round(rv.x),
@@ -841,11 +967,40 @@ export class Voyage {
     if (this.dirty && this.persistCd <= 0) this.persist()
 
     // 카메라 — 내가 자란 만큼 물러난다. 줌아웃이 곧 성장의 감각이다.
+    // 속도 확폭도 화면 눈금 비례 — 상수(+900)면 거대 스케일에서 티도 안 난다.
     const speed = Math.hypot(this.vx, this.vy)
-    const targetView = Math.max(950, R * 26) + Math.min(1, speed / 700) * 900
+    const base = Math.max(950, R * 26)
+    const targetView = base + Math.min(1, speed / (base * 0.74)) * base * 0.95
     this.camera.viewHeight += (targetView - this.camera.viewHeight) * (1 - Math.exp(-1.3 * dt))
     this.camera.follow(this.x + this.vx * 0.3, this.y + this.vy * 0.3, dt, 3.4)
     this.camera.update(dt)
+  }
+
+  /**
+   * 천체의 이름 — 수작업 등록부(태양계·궁수자리 A*) 먼저, 그다음 거리 밴드별
+   * 실명 풀(가까이는 근접 항성, 멀수록 밝은 별 → 극대거성), 이름 없는 티끌만 절차 이름.
+   */
+  private nameBody(b: Body): RealName {
+    const reg = nameOf(b.id)
+    if (reg) return reg
+    const dist = Math.hypot(b.x, b.y) / SECTOR
+    switch (b.kind) {
+      case BodyKind.Sun:
+        return realName(dist < 4 ? 'sunNear' : dist < 8 ? 'sunBright' : 'sunHyper', b.id)
+      case BodyKind.Garden:
+        return realName('nebula', b.id)
+      case BodyKind.Core:
+        return realName('galaxy', b.id)
+      case BodyKind.Comet:
+        return realName('comet', b.id)
+      case BodyKind.Ringed:
+      case BodyKind.Rock:
+        return realName('planet', b.id)
+      default:
+        return b.r >= 10
+          ? realName('asteroid', b.id)
+          : { name: starName(b.id), log: starLog(b.id) }
+    }
   }
 
   /** 삼킴 확정 — 부피·운동량·명부·TDE. */
@@ -876,9 +1031,10 @@ export class Voyage {
     // 명부에는 이름 있는 것만 남는다 — 티끌·파편 스팸이 큰 수확의 기록을 밀어내면 안 된다.
     // 이름 있는 식사는 즉시 저장(마지막 한 입 보존), 티끌은 배치 저장(벨트 훑기 히치 방지).
     if (b.kind !== BodyKind.Dust || b.r >= 10) {
+      const rn = b.hot ? null : this.nameBody(b)
       const entry: JournalEntry = {
-        name: b.hot ? `${starName(b.id)}의 파편` : starName(b.id),
-        log: b.hot ? '내 조석이 그것을 먼저 찢었다.' : starLog(b.id),
+        name: rn ? rn.name : `${starName(b.id)}의 파편`,
+        log: rn ? rn.log : '내 조석이 그것을 먼저 찢었다.',
         kind: b.kind,
         r: Math.round(b.r),
         x: Math.round(b.x),
@@ -886,7 +1042,7 @@ export class Voyage {
       }
       this.journal.push(entry)
       this.lastFound = entry
-      this.persist()
+      this.persistSoon()
     } else {
       this.dirty = true
     }
@@ -905,7 +1061,7 @@ export class Voyage {
     // 명부 규칙은 삼킴과 같다: 이름 있는 것의 파괴만 기록한다 (티끌 스팸 방지)
     if (b.kind !== BodyKind.Dust || b.r >= 10) {
       const entry: JournalEntry = {
-        name: `${starName(b.id)} — 조석 파괴`,
+        name: `${this.nameBody(b).name} — 조석 파괴`,
         log: '삼키기엔 컸다. 그래서 찢었다.',
         kind: b.kind,
         r: Math.round(b.r),
@@ -914,7 +1070,7 @@ export class Voyage {
       }
       this.journal.push(entry)
       this.lastFound = entry
-      this.persist()
+      this.persistSoon()
     } else {
       this.dirty = true
     }
@@ -927,6 +1083,8 @@ export class Voyage {
    * 파편이 로슈 대상이 되어 같은 프레임 연쇄 파쇄 폭주가 난다 (적대 리뷰 critical).
    */
   private spawnDebris(b: Body, n: number, sizeK: number, speed: number, out: boolean): void {
+    // 폭주 보험 — 거대 스케일에서 밀집 지대를 관통하며 연속 파쇄해도 세계가 넘치지 않게
+    if (this.active.length > 1200) return
     const sx = Math.floor(b.x / SECTOR)
     const sy = Math.floor(b.y / SECTOR)
     // sectorBodies 는 캐시 미스면 생성한다 — get 이었을 땐 먼 우주의 파편이
@@ -1158,6 +1316,12 @@ export class Voyage {
           }
           b.push(mxx, myy, Math.max(2.5, r * 0.06), a, cr * 0.45, cg * 0.45, cb * 0.55, 1, Shape.Mote)
         }
+        break
+      }
+      case BodyKind.Rock: {
+        // 민무늬 세계 — 몸통 + 한쪽으로 치우친 밝은 면 (해 뜨는 쪽)
+        b.push(x, y, r, t * 0.03 + s, cr * 0.8, cg * 0.8, cb * 0.9, 1, Shape.Orb)
+        b.push(x - r * 0.26, y - r * 0.22, r * 0.55, 0, cr * 0.35, cg * 0.35, cb * 0.4, 0.6, Shape.Orb)
         break
       }
       case BodyKind.Sun: {

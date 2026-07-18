@@ -40,6 +40,11 @@ function boot(): void {
   }
   window.addEventListener('pointerdown', wake, { once: true })
   window.addEventListener('keydown', wake, { once: true })
+  // 배치 저장의 마지막 조각 — 탭을 닫아도 마지막 한 입은 명부에 남는다
+  window.addEventListener('pagehide', () => game.flush())
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') game.flush()
+  })
 
   ;(window as unknown as Record<string, unknown>)['MAW'] = { game, audio, renderer, input }
 

@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { Input } from '../engine/input'
+import { nameOf } from './starnames'
 import { BodyKind, Voyage, rankOf, type Body, type Store } from './voyage'
 
 function mockInput(x: number, y: number): Input {
@@ -259,6 +260,26 @@ describe('검은 입', () => {
     const fwd = run(900)
     const back = run(-900)
     expect(fwd - back, '먹이 속도 방향으로 밀렸다').toBeGreaterThan(1)
+  })
+
+  it('⑬ 우주는 실재를 참조한다 — 태양계에서 시작하고, 남쪽엔 궁수자리 A*', () => {
+    const g = new Voyage()
+    g.start(null)
+    const earth = g.active.find((b) => nameOf(b.id)?.name === '지구')
+    expect(earth, '지구가 있다').toBeTruthy()
+    expect(earth!.r, '지구는 첫날부터 삼킬 수 없다 — 자격을 갖춰야 한다').toBeGreaterThan(
+      g.radius * 0.8,
+    )
+    const sun = g.active.find((b) => nameOf(b.id)?.name === '태양')
+    expect(sun, '태양이 있다').toBeTruthy()
+    expect(sun!.kind).toBe(BodyKind.Sun)
+    // 궁수자리 A* — 실제 하늘처럼 남쪽, 고정 좌표 (섹터 0,-12)
+    g.x = 1200
+    g.y = -12 * 2400 + 1200
+    g.update(mockInput(0, 0), 1 / 60)
+    const sgr = g.active.find((b) => nameOf(b.id)?.name === '궁수자리 A*')
+    expect(sgr, '은하의 심장이 그 자리에 있다').toBeTruthy()
+    expect(sgr!.r).toBeGreaterThan(4000)
   })
 
   it('⑪ 탐욕스럽게 쫓기만 해도 굶지 않는다 — 성장 페이스', () => {
