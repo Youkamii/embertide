@@ -122,6 +122,7 @@ export class Scene3D {
   private readonly rivalMeshes: THREE.Mesh[] = []
   private readonly rivalGlow: THREE.Sprite[] = []
 
+  private readonly ecliptic: THREE.PolarGridHelper
   private readonly m4 = new THREE.Matrix4()
   private readonly q0 = new THREE.Quaternion()
   private readonly v3 = new THREE.Vector3()
@@ -195,6 +196,15 @@ export class Scene3D {
     )
     this.disk.rotation.x = -Math.PI / 2
     this.scene.add(this.disk)
+
+    // 황도 기준면 — 수직 이동이 "보이게" 하는 유일한 잣대. 별은 무한원경이라
+    // z 로 움직여도 아무 시차가 없다 (실플레이 "z축 못 움직여"의 정체).
+    this.ecliptic = new THREE.PolarGridHelper(1, 12, 10, 56, 0x33477a, 0x1c2a4d)
+    const em = this.ecliptic.material as THREE.Material
+    em.transparent = true
+    em.opacity = 0.22
+    em.depthWrite = false
+    this.scene.add(this.ecliptic)
 
     // 별밭 — 결정론 씨앗의 원거리 배경 (카메라를 따라다닌다: 시차 없는 무한 원경)
     const starN = 3200
@@ -307,6 +317,9 @@ export class Scene3D {
     if (this.scene.fog instanceof THREE.FogExp2) this.scene.fog.density = 0.9 / (dist * 18)
     this.stars.position.copy(this.camera.position)
     this.stars.scale.setScalar(dist * 40)
+    // 기준면은 황도(z=0)에 고정 — 내가 뜨고 가라앉는 게 이 면을 잣대로 읽힌다
+    this.ecliptic.position.set(px, 0, pz)
+    this.ecliptic.scale.setScalar(dist * 3.2)
 
     // 조명 — 가장 가까운 태양이 태양이다
     let sunB: { x: number; y: number; z: number } | null = null

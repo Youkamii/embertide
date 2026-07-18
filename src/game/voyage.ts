@@ -64,7 +64,8 @@ export interface Body {
   /** 결정론 시드이자 식별자 — 이름·명부·eaten 이 전부 이걸 쓴다 */
   readonly id: number
   readonly kind: BodyKindType
-  readonly r: number
+  /** 반지름 — 접촉 잠식으로 깎일 수 있다 (블랙홀은 크기가 아니라 밀도다) */
+  r: number
   readonly cr: number
   readonly cg: number
   readonly cb: number
@@ -220,6 +221,7 @@ export class Voyage {
   private waveX = 0
   private waveY = 0
   private waveT = 1e9
+  private nibbleCd = 0
   /** 나침반 대상 — 3D 렌더러(main)가 화면 화살표로 그린다 */
   preyX = 0
   preyY = 0
@@ -751,7 +753,7 @@ export class Voyage {
         this.vy += (my / ml) * acc * eff * step
         this.heading = Math.atan2(my, mx)
       }
-      if (lift !== 0) this.vz += lift * acc * 0.85 * step
+      if (lift !== 0) this.vz += lift * acc * 1.15 * step
     }
     // 항력 — 추진 중엔 낮고, 놓으면 강하다 ("브레이크 없는 엑셀" 판정의 수리).
     // z 는 따로: 상승키를 놓으면 수직 흐름이 빨리 죽는다 — 층 이동은 탭으로 끝나야
@@ -895,8 +897,9 @@ export class Voyage {
     this.x += this.vx * step
     this.y += this.vy * step
     this.z += this.vz * step
-    // z 슬랩 — 우주는 넓지만 무한히 뜨면 아무도 못 만난다
-    const zMax = base * 0.8
+    // z 슬랩 — 우주는 넓지만 무한히 뜨면 아무도 못 만난다.
+    // 0.8 은 천장이 2초 거리라 "z축 못 움직여"가 됐다 (실플레이) — 넉넉히.
+    const zMax = base * 2.2
     if (this.z > zMax) {
       this.z = zMax
       if (this.vz > 0) this.vz = 0
@@ -916,6 +919,30 @@ export class Voyage {
       this.streamIn -= take
       this.feed = Math.max(this.feed, 0.55)
       this.gulp = Math.max(this.gulp, 0.25)
+    }
+
+    // ── 접촉 잠식 — 땅콩만 한 블랙홀도 지구를 갉는다 (크기가 아니라 밀도다).
+    // 나보다 큰 것도 몸이 닿으면 표면이 깎여 스트림으로 흘러들어온다.
+    // 속도는 내 단면적(R²) 비례 — 작을 땐 스멀스멀, 클수록 험악하게.
+    this.nibbleCd -= step
+    for (const b of this.active) {
+      if (b.r < R || this.eaten.has(b.id)) continue
+      const d = Math.hypot(b.x - this.x, b.y - this.y, b.z - this.z)
+      if (d < (R + b.r) * 1.03) {
+        const bite = Math.min(b.r * b.r * b.r * 0.4, R * R * 0.5) * step
+        b.r = Math.cbrt(Math.max(1, b.r * b.r * b.r - bite))
+        this.streamIn += bite * ABSORB_GAIN
+        this.feed = Math.max(this.feed, 0.4)
+        if (this.nibbleCd <= 0) {
+          this.nibbleCd = 0.13
+          const a = Math.atan2(this.y - b.y, this.x - b.x)
+          this.spawnGas(
+            b.x + Math.cos(a) * b.r, b.y + Math.sin(a) * b.r, b.z,
+            Math.cos(a + 1.2) * R * 6, Math.sin(a + 1.2) * R * 6, 0,
+            Math.max(4, R * 0.8), Math.min(1.3, b.cr * 1.3), b.cg * 0.8, b.cb * 0.6, 1.1,
+          )
+        }
+      }
     }
 
     // ── 로슈 한계 — 삼키기엔 크고 나보다 작은 것: 바짝 붙으면 조석으로 찢긴다.

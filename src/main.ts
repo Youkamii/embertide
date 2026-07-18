@@ -150,10 +150,12 @@ function boot(): void {
   const steer = (): void => {
     // 이동은 WASD(카메라 기준)·스페이스·시프트, 마우스 왼쪽은 시점 회전 전용
     const w = wrapped as unknown as { move: { x: number; y: number }; lift: number }
+    // forward = 카메라 반대편(화면 안쪽), right = forward 를 +90° 돌린 것.
+    // 부호가 하나라도 틀리면 좌우 반전 — D 는 반드시 화면 오른쪽이다 (실플레이).
     const fx = -Math.sin(scene.yaw)
     const fy = -Math.cos(scene.yaw)
-    w.move.x = fy * input.move.x + fx * input.move.y
-    w.move.y = -fx * input.move.x + fy * input.move.y
+    w.move.x = -fy * input.move.x + fx * input.move.y
+    w.move.y = fx * input.move.x + fy * input.move.y
     w.lift = input.lift
   }
 

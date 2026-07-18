@@ -353,6 +353,27 @@ describe('검은 입', () => {
     expect(ice.length, '얼음이 지천이다').toBeGreaterThanOrEqual(5)
   })
 
+  it('⑰ 땅콩만 해도 갉는다 — 접촉 잠식 (블랙홀은 크기가 아니라 밀도다)', () => {
+    const g = new Voyage()
+    g.start(null)
+    const earth = g.active.find((b) => nameOf(b.id)?.name === '지구')!
+    const r0 = earth.r
+    const vol0 = g.vol
+    const input = mockInput(0, 0)
+    for (let s = 0; s < 120; s++) {
+      g.x = earth.x + (g.radius + earth.r) * 0.99
+      g.y = earth.y
+      g.z = earth.z
+      g.vx = 0
+      g.vy = 0
+      g.vz = 0
+      g.update(input, 1 / 60)
+    }
+    expect(earth.r, '지구가 스멀스멀 깎인다').toBeLessThan(r0 - 0.03)
+    for (let s = 0; s < 120; s++) g.update(input, 1 / 60)
+    expect(g.vol, '깎인 것은 스트림으로 내 것이 된다').toBeGreaterThan(vol0 + 10)
+  })
+
   it('⑪ 탐욕스럽게 쫓기만 해도 굶지 않는다 — 성장 페이스', () => {
     const g = new Voyage()
     g.start(null)
