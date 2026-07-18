@@ -204,6 +204,34 @@ describe('검은 입', () => {
     expect(g.vol, '파편을 먹고 자랐다').toBeGreaterThan(vol0)
   })
 
+  it('⑫ 작은 몸의 조석 파괴는 연쇄 폭발하지 않는다 (파편은 언제나 먹이 크기)', () => {
+    // 적대 리뷰 critical 재현: R≈2.47 일 때 r=2.2 천체를 로슈 반경 안에 —
+    // 파편 절대 하한(2.2)이 남아 있으면 같은 프레임 연쇄 파쇄로 여기서 멈춘다.
+    const g = new Voyage()
+    g.start(null)
+    g.vol = 15
+    const R = g.radius
+    const victim = g.active[0]!
+    const planted = {
+      ...victim,
+      id: 987654321,
+      r: 2.2,
+      x: g.x + (R + 2.2) * 1.1,
+      y: g.y,
+      host: null,
+      orbR: 0,
+      free: true,
+      hot: false,
+    }
+    g.active.push(planted)
+    const n0 = g.active.length
+    g.update(mockInput(0, 0), 1 / 60)
+    expect(g.active.length, '파편 수가 유한하다').toBeLessThan(n0 + 10)
+    for (const b of g.active) {
+      if (b.hot) expect(b.r, '파편은 먹이 크기').toBeLessThan(g.radius * 0.8)
+    }
+  })
+
   it('⑩ 먹은 것의 운동량이 내 것이 된다', () => {
     // 같은 우주에서 먹이 속도만 반대로 — 중력 잡음이 상쇄되고 운동량 항만 남는다
     const run = (pvx: number): number => {

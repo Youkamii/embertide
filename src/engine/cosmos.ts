@@ -31,10 +31,10 @@ uniform vec3 u_tintB;    // 성운 색 B
 uniform float u_intensity; // 0..1 — 후반일수록 성운이 타오른다
 uniform float u_hole;    // 사건의 지평선 반지름 (월드 px). 0 = 블랙홀 없음
 uniform vec2 u_holeC;    // 블랙홀 중심 (월드 좌표) — 검은 입에선 플레이어 자신이다
-uniform float u_beat;    // 0..1 심장박동 엔벨로프 — 광자 고리·원반이 뛴다
-uniform float u_feed;    // 0..1 포식 강도 — 원반이 타오른다
-uniform float u_diskIn;  // 원반 대역 안쪽 반지름 (월드 px) — acts.DISK_IN 이 단일 진실
-uniform float u_diskOut; // 원반 대역 바깥 반지름 — 배경의 원반이 곧 게임의 원반이어야 한다
+uniform float u_beat;    // 0..1 꿀꺽 펄스 — 삼킨 직후 광자 고리가 뛴다 (Voyage.gulp)
+uniform float u_feed;    // 0..1 포식 강도 — TDE 플레어. 원반이 타오른다 (Voyage.feed)
+uniform float u_diskIn;  // 강착원반 안쪽 반지름 (월드 px) — Voyage 가 R×1.35 를 넣는다
+uniform float u_diskOut; // 강착원반 바깥 반지름 — Voyage 가 R×3.1 을 넣는다
 
 float hash21(vec2 p) {
   p = fract(p * vec2(233.34, 851.73));
@@ -144,8 +144,7 @@ void main() {
   col += nebCol * 0.02 * pow(clamp(1.0 - r * 0.6, 0.0, 1.0), 3.0);
 
   if (hr > 1.0) {
-    // ── 강착원반: **플레이 대역과 정렬** — 배경의 원반이 곧 게임의 원반이어야
-    // "저 강물 안이 부자 동네"가 화면에서 읽힌다. 경계는 유니폼(acts 데이터)이 정한다.
+    // ── 강착원반: 내(플레이어) 주위를 도는 개인 원반 — 삼킬 때(u_feed) 타오른다.
     float diskT = (wr - u_diskIn) / max(1.0, u_diskOut - u_diskIn);
     if (diskT < 1.15 && wr > hr * 0.5) {
       float ang = atan(rel.y, rel.x);
@@ -160,7 +159,7 @@ void main() {
                  * (0.5 + u_intensity * 0.5 + u_feed * 1.1 + u_beat * 0.25);
       col += diskCol * glow * 0.55;
     }
-    // ── 광자 고리: 지평선 바로 밖 얇은 빛. 심장박동이 여기서 가장 잘 보인다.
+    // ── 광자 고리: 지평선 바로 밖 얇은 빛. 꿀꺽 펄스(u_beat)가 여기서 가장 잘 보인다.
     float ring = exp(-abs(wr - hr * 1.045) / (hr * 0.028));
     col += vec3(1.5, 1.15, 0.72) * ring * (0.55 + u_beat * 0.85 + u_feed * 0.7);
     // ── 사건의 지평선: 모든 빛을 삼킨다. 배경 패스는 무블렌드 쓰기라
@@ -187,11 +186,11 @@ export class Cosmos {
   /** 블랙홀 중심 (월드 좌표) — 검은 입에선 플레이어 위치. 렌즈·원반·지평선이 따라온다 */
   holeX = 0
   holeY = 0
-  /** 0..1 심장박동 엔벨로프 — R3(리듬)가 넣는다 */
+  /** 0..1 꿀꺽 펄스 — Voyage.gulp 가 넣는다 (삼킨 직후 광자 고리가 뛴다) */
   beat = 0
-  /** 0..1 포식 강도 — 원반이 타오르고 고리가 조인다 */
+  /** 0..1 포식 강도 — Voyage.feed (TDE 플레어). 원반이 타오르고 고리가 조인다 */
   feed = 0
-  /** 원반 대역 경계(월드 px) — acts.DISK_IN/OUT × 지평선. 게임이 매 프레임 넣는다 */
+  /** 강착원반 경계(월드 px) — Voyage 가 R×1.35 / R×3.1 을 매 프레임 넣는다 */
   diskIn = 0
   diskOut = 0
 

@@ -151,8 +151,9 @@ function boot(): void {
         started = true
         center.replaceChildren()
         wake()
-        input.endFrame()
       }
+      // 타이틀에서도 시간은 흐른다 — 별이 반짝이고 성운이 흘러야 우주가 살아 보인다
+      game.visualTime += dt
       renderer.resize()
       game.render(renderer)
       input.endFrame()
