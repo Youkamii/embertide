@@ -934,9 +934,10 @@ export class Voyage {
       if (b.r < R || this.eaten.has(b.id)) continue
       const d = Math.hypot(b.x - this.x, b.y - this.y, b.z - this.z)
       if (d < (R + b.r) * 1.03) {
-        // 잠식 속도 ∝ 내 단면적 × 대상 크기 — 클수록 뜯기는 표면도 크다.
-        // 이 항이 없으면 태양 하나에 10분이 걸린다 (실플레이).
-        const bite = Math.min(b.r * b.r * b.r * 0.5, R * R * 1.3 * (1 + b.r / 10)) * step
+        // 잠식은 비율제 — 접촉하면 초당 35~70% 씩 무너진다. 땅콩만 해도 블랙홀은
+        // 블랙홀이다: 지구 1~2초, 목성 2~4초 ("목성부터 하루 종일" 판정의 수리).
+        const frac = 0.35 + 0.35 * Math.min(1, R / b.r)
+        const bite = b.r * b.r * b.r * frac * step
         b.r = Math.cbrt(Math.max(1, b.r * b.r * b.r - bite))
         this.streamIn += bite * ABSORB_GAIN
         this.feed = Math.max(this.feed, 0.4)
