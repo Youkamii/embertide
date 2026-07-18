@@ -1008,6 +1008,25 @@ export class Voyage {
         this.heading = Math.atan2(my, mx)
       }
       if (lift !== 0) this.vz += lift * acc * 1.15 * step
+      // 순항 조향 — 속도가 아무리 높아도 방향은 든다: 입력 방향으로 속도
+      // 벡터를 회전(1.6rad/s, 어떤 속도든 ~2초 U턴). 가속만으론 순항 속도에서
+      // 선회 반경이 행성계만 해진다 ("속도만 높으면 컨트롤을 어떻게 해").
+      // 거의 정반대 입력(140°+)은 회전 대신 역추진 브레이크가 맡는다.
+      if (this.cruise > 2 && (mx !== 0 || my !== 0)) {
+        const sp = Math.hypot(this.vx, this.vy)
+        if (sp > base * 2) {
+          const cur = Math.atan2(this.vy, this.vx)
+          let dAng = Math.atan2(my, mx) - cur
+          while (dAng > Math.PI) dAng -= 2 * Math.PI
+          while (dAng < -Math.PI) dAng += 2 * Math.PI
+          if (Math.abs(dAng) < 2.4) {
+            const turn = Math.max(-1.6 * step, Math.min(1.6 * step, dAng))
+            const na = cur + turn
+            this.vx = Math.cos(na) * sp
+            this.vy = Math.sin(na) * sp
+          }
+        }
+      }
     }
     // 항력 — 추진 중엔 낮고, 먹이 곁에서 놓으면 강하다 ("브레이크 없는 엑셀"의
     // 수리). 단 **빈 우주에선 거의 없다** — 활공 항력이 공전 속도까지 죽이면
