@@ -188,6 +188,7 @@ function boot(): void {
       if (journalOpen) renderJournal()
     }
     if (input.consumePressed('m')) audio.setMuted(!audio.muted)
+    if (input.consumePressed('x')) scene.axes.visible = !scene.axes.visible
 
     if (!journalOpen) {
       steer()
@@ -252,7 +253,8 @@ function boot(): void {
     coords.textContent =
       `${rankOf(game.radius)}  ·  r${Math.round(game.radius)}\n` +
       `(${Math.round(game.x)}, ${Math.round(game.y)}, z${Math.round(game.z)})  ·  ` +
-      `이번 항해 ${game.eatenThisRun} · 명부 ${game.journal.length}`
+      `이번 항해 ${game.eatenThisRun} · 명부 ${game.journal.length}\n` +
+      `축(X 토글): 빨강 x · 파랑 y · 초록 z↑`
 
     input.endFrame()
     requestAnimationFrame(frame)

@@ -123,6 +123,8 @@ export class Scene3D {
   private readonly rivalGlow: THREE.Sprite[] = []
 
   private readonly ecliptic: THREE.PolarGridHelper
+  /** 축 표시기 — three(X,Y,Z)=(빨,초,파) = 게임 (x, z↑, y). X 키 토글 */
+  readonly axes: THREE.AxesHelper
   private readonly m4 = new THREE.Matrix4()
   private readonly q0 = new THREE.Quaternion()
   private readonly v3 = new THREE.Vector3()
@@ -205,6 +207,13 @@ export class Scene3D {
     em.opacity = 0.22
     em.depthWrite = false
     this.scene.add(this.ecliptic)
+
+    this.axes = new THREE.AxesHelper(1)
+    const am = this.axes.material as THREE.Material
+    am.transparent = true
+    am.opacity = 0.75
+    am.depthWrite = false
+    this.scene.add(this.axes)
 
     // 별밭 — 결정론 씨앗의 원거리 배경 (카메라를 따라다닌다: 시차 없는 무한 원경)
     const starN = 3200
@@ -321,6 +330,8 @@ export class Scene3D {
     // 기준면은 황도(z=0)에 고정 — 내가 뜨고 가라앉는 게 이 면을 잣대로 읽힌다
     this.ecliptic.position.set(px, 0, pz)
     this.ecliptic.scale.setScalar(dist * 3.2)
+    this.axes.position.set(px, py, pz)
+    this.axes.scale.setScalar(dist * 0.22)
 
     // 조명 — 가장 가까운 태양이 태양이다
     let sunB: { x: number; y: number; z: number } | null = null

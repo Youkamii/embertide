@@ -42,10 +42,10 @@ const FRAME_DRAG = 0.45
 const MAW_PULL = 3
 /** 로슈 접근 배율 — (R + r) 의 이 배수 안이면 조석 파괴 */
 const ROCHE = 1.3
-/** 삼킨 부피 중 내 것이 되는 비율 — 나머지는 강착 과정에서 새는 셈 */
-const ABSORB_GAIN = 0.85
-/** 조석 파괴에서 가스 스트림으로 흘러드는 비율 — 통째(0.85)보다 손해: 조급함의 세금 */
-const SHRED_STREAM = 0.5
+/** 삼킨 부피의 성장 환산 배율 — 1 이상: 성장은 게임의 심장이라 후하게 (실플레이 "느려") */
+const ABSORB_GAIN = 1.15
+/** 조석 파괴에서 가스 스트림으로 흘러드는 비율 — 통째보다 손해: 조급함의 세금 */
+const SHRED_STREAM = 0.75
 /** 조석 파괴가 남기는 고체 심(얼음 핵) 반지름 배율 */
 const SHRED_CORE = 0.42
 
@@ -919,7 +919,7 @@ export class Voyage {
 
     // ── 가스 스트림 강착 — 찢긴 질량은 구름으로 흘러들어와 서서히 내 것이 된다
     if (this.streamIn > 0.5) {
-      const take = this.streamIn * (1 - Math.exp(-2.0 * step))
+      const take = this.streamIn * (1 - Math.exp(-3.2 * step))
       this.vol += take
       this.streamIn -= take
       this.feed = Math.max(this.feed, 0.55)
@@ -934,7 +934,7 @@ export class Voyage {
       if (b.r < R || this.eaten.has(b.id)) continue
       const d = Math.hypot(b.x - this.x, b.y - this.y, b.z - this.z)
       if (d < (R + b.r) * 1.03) {
-        const bite = Math.min(b.r * b.r * b.r * 0.4, R * R * 0.5) * step
+        const bite = Math.min(b.r * b.r * b.r * 0.4, R * R * 1.3) * step
         b.r = Math.cbrt(Math.max(1, b.r * b.r * b.r - bite))
         this.streamIn += bite * ABSORB_GAIN
         this.feed = Math.max(this.feed, 0.4)
@@ -995,7 +995,7 @@ export class Voyage {
         const d = Math.hypot(dxy, dzEff)
         const relV = Math.hypot(b.vx - this.vx, b.vy - this.vy, b.vz - this.vz)
         if (d < R * 3.2 + b.r + relV * step) {
-          this.absorbs.push({ b, t: 0, dur: 0.3 + Math.min(0.5, (b.r / R) * 0.55) })
+          this.absorbs.push({ b, t: 0, dur: 0.22 + Math.min(0.35, (b.r / R) * 0.4) })
         }
       }
     }
