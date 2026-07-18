@@ -296,26 +296,33 @@ export class Scene3D {
     this.lensPass = new ShaderPass(LENS_SHADER)
     this.composer.addPass(this.lensPass)
 
-    // 카메라 조작 — 왼쪽 드래그 회전, 휠 줌. 오른쪽 버튼은 아무것도 하지 않는다.
+    // 카메라 조작 — 왼쪽 드래그 회전(증분·포인터 ID 단일 핸들러), 휠 줌.
+    // 클로저 누적 방식은 포인터업을 놓치면 죽은 핸들러가 남아 yaw 가 두 기준
+    // 사이를 오가며 툭툭 튀었다 (실플레이). 오른쪽 버튼은 아무것도 하지 않는다.
+    let dragId = -1
+    let lastX = 0
+    let lastY = 0
     canvas.addEventListener('pointerdown', (e) => {
       if (e.button === 0 && e.pointerType !== 'touch') {
-        const startX = e.clientX
-        const startY = e.clientY
-        const y0 = this.yaw
-        const p0 = this.pitch
-        const move = (ev: PointerEvent): void => {
-          this.yaw = y0 + (ev.clientX - startX) * 0.006
-          // 아래(-)로도 내려간다 — 위를 올려다볼 수 있어야 3D 다 (실플레이)
-          this.pitch = Math.min(1.35, Math.max(-1.35, p0 + (ev.clientY - startY) * 0.005))
-        }
-        const up = (): void => {
-          window.removeEventListener('pointermove', move)
-          window.removeEventListener('pointerup', up)
-        }
-        window.addEventListener('pointermove', move)
-        window.addEventListener('pointerup', up)
+        dragId = e.pointerId
+        lastX = e.clientX
+        lastY = e.clientY
+        canvas.setPointerCapture(e.pointerId)
       }
     })
+    canvas.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== dragId) return
+      this.yaw += (e.clientX - lastX) * 0.006
+      this.pitch = Math.min(1.35, Math.max(-1.35, this.pitch + (e.clientY - lastY) * 0.005))
+      lastX = e.clientX
+      lastY = e.clientY
+    })
+    const endDrag = (e: PointerEvent): void => {
+      if (e.pointerId === dragId) dragId = -1
+    }
+    canvas.addEventListener('pointerup', endDrag)
+    canvas.addEventListener('pointercancel', endDrag)
+    canvas.addEventListener('lostpointercapture', endDrag)
     canvas.addEventListener('wheel', (e) => {
       this.zoomBias = Math.min(2.4, Math.max(0.45, this.zoomBias * (e.deltaY > 0 ? 1.1 : 0.9)))
       e.preventDefault()
