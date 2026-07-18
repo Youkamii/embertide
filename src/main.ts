@@ -253,7 +253,8 @@ function boot(): void {
     coords.textContent =
       `${rankOf(game.radius)}  ·  r${Math.round(game.radius)}\n` +
       `(${Math.round(game.x)}, ${Math.round(game.y)}, z${Math.round(game.z)})  ·  ` +
-      `이번 항해 ${game.eatenThisRun} · 명부 ${game.journal.length}\n` +
+      `이번 항해 ${game.eatenThisRun} · 명부 ${game.journal.length}` +
+      `${game.halo.length > 0 ? ` · 나의 은하 ${game.halo.length}성` : ''}\n` +
       `축(X 토글): 빨강 x · 파랑 y · 초록 z↑`
 
     input.endFrame()

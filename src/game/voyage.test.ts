@@ -374,6 +374,30 @@ describe('검은 입', () => {
     expect(g.vol, '깎인 것은 스트림으로 내 것이 된다').toBeGreaterThan(vol0 + 10)
   })
 
+  it('⑱ 은하화 — 거대해지면 잔챙이는 삼켜지지 않고 나를 영원히 돈다', () => {
+    const g = new Voyage()
+    g.start(null)
+    g.vol = Math.pow(70, 3) // R 70 — 은하화 문턱(60) 위
+    const victim = g.active[0]!
+    const tiny = {
+      ...victim,
+      id: 123456789,
+      r: 2.5,
+      x: g.x + g.radius * 2,
+      y: g.y,
+      z: g.z,
+      host: null,
+      orbR: 0,
+      free: true,
+      hot: false,
+    }
+    g.active.push(tiny)
+    const input = mockInput(0, 0)
+    for (let s = 0; s < 30; s++) g.update(input, 1 / 60)
+    expect(g.halo.length, '은하가 생겼다').toBeGreaterThanOrEqual(1)
+    expect(g.active.some((b) => b.id === tiny.id), '세계에서는 사라졌다').toBe(false)
+  })
+
   it('⑪ 탐욕스럽게 쫓기만 해도 굶지 않는다 — 성장 페이스', () => {
     const g = new Voyage()
     g.start(null)

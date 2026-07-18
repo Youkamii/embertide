@@ -154,6 +154,18 @@ interface Absorb {
   dur: number
 }
 
+/** 은하화 — 포획된 잔챙이. 내 주위를 영원히 돈다 (반지름 배수 k 로 저장: 은하가 나와 함께 자란다) */
+export interface HaloStar {
+  k: number
+  ang: number
+  w: number
+  inc: number
+  size: number
+  cr: number
+  cg: number
+  cb: number
+}
+
 /** 가스 입자 — 조석 스트림·TDE 분출·합병의 연기. 풀 고정, 프레임 할당 0. */
 interface Gas {
   x: number
@@ -194,6 +206,8 @@ export class Voyage {
 
   // ── 포식
   readonly absorbs: Absorb[] = []
+  /** 은하화 — 내가 거느린 별들. 커질수록 은하가 된다 */
+  readonly halo: HaloStar[] = []
   /** 가스 스트림으로 흘러드는 중인 부피 — 조석 파괴의 수확은 구름으로 온다 */
   private streamIn = 0
 
@@ -265,6 +279,7 @@ export class Voyage {
     this.farthest = 0
     this.lastFound = null
     this.absorbs.length = 0
+    this.halo.length = 0
     this.streamIn = 0
     this.sectors.clear()
     this.solSun = null
@@ -998,6 +1013,26 @@ export class Voyage {
         const d = Math.hypot(dxy, dzEff)
         const relV = Math.hypot(b.vx - this.vx, b.vy - this.vy, b.vz - this.vz)
         if (d < R * 3.2 + b.r + relV * step) {
+          // 은하화 — 내가 크고 상대가 티끌이면 삼키지 않고 궤도에 가둔다.
+          // 초대질량 블랙홀이 은하를 거느리는 방식 그대로: 영원히 돈다.
+          if (R > 60 && b.r < R * 0.045 && this.halo.length < 380) {
+            this.eaten.add(b.id)
+            const idx2 = this.active.indexOf(b)
+            if (idx2 >= 0) this.active.splice(idx2, 1)
+            const h = b.id >>> 0
+            const k = 2.2 + (h % 1000) * 0.0048 // 2.2R ~ 7R
+            this.halo.push({
+              k,
+              ang: (h % 628) * 0.01,
+              w: (0.55 + ((h >>> 10) % 100) * 0.004) / Math.sqrt(k), // 케플러: 안쪽이 빠르다
+              inc: (((h >>> 5) % 100) * 0.01 - 0.5) * 0.4,
+              size: b.r,
+              cr: Math.min(1.2, b.cr * 1.2),
+              cg: Math.min(1.1, b.cg * 1.1),
+              cb: b.cb,
+            })
+            continue
+          }
           this.absorbs.push({ b, t: 0, dur: 0.22 + Math.min(0.35, (b.r / R) * 0.4) })
         }
       }
@@ -1096,6 +1131,9 @@ export class Voyage {
     this.gulp = Math.max(0, this.gulp - step * 2.2)
     this.feed = Math.max(0, this.feed - step * 0.8)
     this.waveT += step
+
+    // 은하 공전 — 포획된 별들은 나를 영원히 돈다
+    for (const h of this.halo) h.ang += h.w * step
 
     // 가스 — 살아있는 연기. 내 쪽으로 약하게 감긴다
     for (const g of this.gas) {

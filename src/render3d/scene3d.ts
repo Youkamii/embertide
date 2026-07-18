@@ -115,6 +115,8 @@ export class Scene3D {
 
   private readonly lit: THREE.InstancedMesh
   private readonly emis: THREE.InstancedMesh
+  /** 은하화된 별들 — 나를 도는 나의 은하 */
+  private readonly haloMesh: THREE.InstancedMesh
   private readonly glows: THREE.Sprite[] = []
   private readonly gasSprites: THREE.Sprite[] = []
   private readonly marks: THREE.Sprite[] = []
@@ -167,6 +169,9 @@ export class Scene3D {
     this.emis = new THREE.InstancedMesh(sphere, new THREE.MeshBasicMaterial(), 600)
     this.emis.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
     this.scene.add(this.emis)
+    this.haloMesh = new THREE.InstancedMesh(sphere, new THREE.MeshBasicMaterial(), 400)
+    this.haloMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    this.scene.add(this.haloMesh)
 
     for (let i = 0; i < MAX_GLOW; i++) {
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -548,6 +553,29 @@ export class Scene3D {
       sp.material.color.setRGB(threat ? 1.2 : 0.5, threat ? 0.25 : 0.5, threat ? 0.2 : 0.55)
       sp.material.opacity = 0.5
     }
+
+    // 은하 — 내가 거느린 별들. 내가 움직이면 은하째 따라온다
+    let haloN = 0
+    for (const h of g.halo) {
+      if (haloN >= 400) break
+      const rr = h.k * R
+      const ca = Math.cos(h.ang)
+      const sa = Math.sin(h.ang)
+      this.v3.set(
+        px + ca * rr,
+        py + sa * rr * Math.sin(h.inc),
+        pz + sa * rr * Math.cos(h.inc),
+      )
+      this.s3.setScalar(Math.max(h.size, R * 0.02))
+      this.m4.compose(this.v3, this.q0, this.s3)
+      this.haloMesh.setMatrixAt(haloN, this.m4)
+      this.col.setRGB(Math.min(1, h.cr), Math.min(1, h.cg), Math.min(1, h.cb))
+      this.haloMesh.setColorAt(haloN, this.col)
+      haloN++
+    }
+    this.haloMesh.count = haloN
+    this.haloMesh.instanceMatrix.needsUpdate = true
+    if (this.haloMesh.instanceColor) this.haloMesh.instanceColor.needsUpdate = true
 
     // 나 + 원반
     this.playerMesh.position.set(px, py, pz)
