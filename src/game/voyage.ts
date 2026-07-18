@@ -26,6 +26,9 @@ import { catalogName, nameOf, realName, registerName, starLog, starName, type Re
 /** 섹터 시드 상수 — 절차 채움(오르트 얼음·떠돌이)의 결정론 유지 */
 export const UNIVERSE_SEED = 20260718
 
+/** 실지도 항성계의 몸체 id — 다음 항로 나침반이 "이미 삼킨 계"를 거르는 데 쓴다 */
+const MAP_IDS: readonly number[] = STAR_MAP.map((s) => hashSeed(`map:${s.name}`))
+
 const SECTOR = 2400
 /** 삼킬 수 있는 크기 비율 — 내 반지름의 이 배수 미만이면 먹이다 */
 const EDIBLE = 0.8
@@ -288,6 +291,12 @@ export class Voyage {
   preyY = 0
   preyZ = 0
   preyDist = Infinity
+  /** 성간 순항 배율 — 먹이도 천체도 없는 공허에서만 붙는다 (HUD 가 읽는다) */
+  cruise = 1
+  private nearAny = Infinity
+  /** 다음 항로 — 근처에 먹을 게 없으면 나침반이 별 지도의 목적지를 가리킨다 */
+  routeName: string | null = null
+  routeDist = 0
 
   private readonly gas: Gas[] = []
   private gasIdx = 0
@@ -347,6 +356,10 @@ export class Voyage {
     this.quasar = 0
     this.jetCd = 0
     this.cometCd = 0
+    this.cruise = 1
+    this.nearAny = Infinity
+    this.routeName = null
+    this.routeDist = 0
     for (const g of this.gas) g.life = 0
     if (store) {
       try {
@@ -569,9 +582,53 @@ export class Voyage {
         list.push(pb)
       }
     }
-    // 성단은 별 여럿이 함께 돈다 (플레이아데스 — 일곱 자매)
+    // 도착의 성찬 — 항성계는 행성 몇 개가 아니라 벨트·혜성·먼지의 잔칫상이다.
+    // 이게 없으면 몇 광년을 날아가서 만나는 게 "점 하나"다 (실플레이).
+    if (kind === BodyKind.Sun) {
+      const beltN = Math.min(24, 8 + Math.floor(star.r * 0.1))
+      for (let i = 0; i < beltN; i++) {
+        const dId = hashSeed(`map:${sys.name}:belt:${i}`)
+        const d = this.newBody(dId, BodyKind.Dust, star.x, star.y,
+          2.2 + rng.next() * 3.6, 0.55, 0.52, 0.5)
+        this.setOrbit(d, star, star.r * (3.4 + rng.next() * 2.6),
+          rng.next() * Math.PI * 2, 1, 0, (rng.next() - 0.5) * 0.2)
+        list.push(d)
+      }
+      const cometN = 2 + rng.int(2)
+      for (let i = 0; i < cometN; i++) {
+        const cId2 = hashSeed(`map:${sys.name}:comet:${i}`)
+        const cb2 = this.newBody(cId2, BodyKind.Comet, star.x, star.y,
+          3.5 + rng.next() * 3, 0.8, 0.9, 1.0)
+        this.setOrbit(cb2, star, star.r * (5 + rng.next() * 3),
+          rng.next() * Math.PI * 2, 1, 0.5 + rng.next() * 0.25, (rng.next() - 0.5) * 0.5)
+        list.push(cb2)
+      }
+    }
+    // 성운은 별의 요람이다 — 어린 별들이 가스 속에서 태어나고 있다 (실물리)
+    if (kind === BodyKind.Garden && sys.r > 0) {
+      const n = 12
+      for (let i = 0; i < n; i++) {
+        const sId = hashSeed(`map:${sys.name}:yso:${i}`)
+        const sr = 12 + rng.next() * 30
+        const s = this.newBody(sId, BodyKind.Sun,
+          sys.x + (rng.next() - 0.5) * sys.r * 1.7,
+          sys.y + (rng.next() - 0.5) * sys.r * 1.7, sr, 0.85, 0.8, 1.35)
+        s.z = sys.z + (rng.next() - 0.5) * sys.r * 0.5
+        list.push(s)
+      }
+      // 게 성운의 심장 — 펄서. 1초에 30번 도는 등대 (렌더러가 빔을 돌린다)
+      if (sys.name === '게 성운') {
+        const pid = hashSeed('map:게 성운:펄서')
+        const p = this.newBody(pid, BodyKind.Sun, sys.x, sys.y, 16, 1.2, 1.3, 1.6)
+        p.z = sys.z
+        registerName(pid, '게 펄서', '초신성이 남긴 심장 — 등대처럼 돌며 우주를 쓸고 있었다.')
+        list.push(p)
+      }
+    }
+    // 성단은 별 여럿이 함께 돈다 (플레이아데스 — 일곱 자매. 구상성단은 훨씬 많다)
     if (kind === BodyKind.Garden && sys.r === 0) {
-      for (let i = 0; i < 6; i++) {
+      const clusterN = sys.ly > 1000 ? 18 : 6
+      for (let i = 0; i < clusterN; i++) {
         const sId = hashSeed(`map:${sys.name}:s${i}`)
         const sr = 90 + rng.next() * 110
         const s = this.newBody(sId, BodyKind.Sun, sys.x, sys.y, sr, 0.8, 0.95, 1.4)
@@ -752,10 +809,12 @@ export class Voyage {
   /** 이 섹터의 결정론 라이벌 — 성간부터 나타난다. 요람은 안전해야 한다. */
   private sectorRival(sx: number, sy: number): Rival | null {
     const rC = Math.hypot((sx + 0.5) * SECTOR, (sy + 0.5) * SECTOR)
-    if (rC < SHELL.kuiperOut) return null // 요람·행성계는 안전, 카이퍼부터 사냥터
+    // 태양계 전체(오르트 안)가 요람이다 — 카이퍼에서 만난 라이벌은 "빨간 게
+    // 부딪히기나 하는" 초반 훼방꾼이었다 (실플레이). 사냥터는 진짜 성간부터.
+    if (rC < SHELL.oortOut) return null
     const seed = hashSeed(`${UNIVERSE_SEED}:rv:${sx}:${sy}`)
     const rng = new Rng(seed)
-    if (rng.next() >= 0.16) return null
+    if (rng.next() >= 0.07) return null
     const r = Math.min(760, 24 + (rC / LY) * 26 + rng.next() * 20)
     return {
       id: seed,
@@ -838,7 +897,14 @@ export class Voyage {
     const my = input.move.y
     const lift = input.lift ?? 0
     this.thrusting = mx !== 0 || my !== 0 || lift !== 0
-    const acc = thrustAcc(R)
+    // 성간 순항 — 먹이도 천체도 없는 공허(오르트 밖의 한세월)에서는 추진이
+    // 몇 배로 열린다: "다음 별이 너무 멀어"의 수리. 태양계 안 오르트까지의
+    // 한세월 감각은 그대로 두고, 진짜 빈 성간만 접는다. 뭔가 가까워지면
+    // 빠르게 풀린다 — 도착 브레이크가 순항보다 세야 지나치지 않는다.
+    const empty = this.nearAny > base * 4 && this.preyDist > base * 6
+    const ck = empty && this.thrusting ? 0.45 : 2.4
+    this.cruise += ((empty && this.thrusting ? 6 : 1) - this.cruise) * (1 - Math.exp(-ck * step))
+    const acc = thrustAcc(R) * this.cruise
     if (this.thrusting) {
       const ml = Math.hypot(mx, my) || 1
       if (mx !== 0 || my !== 0) {
@@ -900,11 +966,16 @@ export class Voyage {
         const d = Math.sqrt(d2) || 1
         const edibleB = b.r < R * EDIBLE
         {
-          let g = Math.min(PULL_CAP_BY_ME, (R * R * GRAV * MAW_PULL) / d2)
+          // 질량 비례 강화 — 블랙홀 질량은 R³·밀도(R)로 붇는다. 커질수록 같은
+          // 거리의 행성이 더 세게 뜯겨 오고, 태양을 삼킨 몸 곁에선 온 행성계가
+          // 레일을 이탈해 낙하를 시작한다 ("전부 빨아들이는데 찰나": 실플레이).
+          const heavy = 1 + R / 120
+          const capMe = PULL_CAP_BY_ME * (1 + R / 300)
+          let g = Math.min(capMe, (R * R * GRAV * MAW_PULL * heavy) / d2)
           // 먹이급 견인 보너스 — 상수 사거리 대신 부드러운 감쇠 (전역 유효)
           if (edibleB) {
             const near = (R * 20) / (d + R * 20)
-            g = Math.min(PULL_CAP_BY_ME, g + 160 * (1 + R / 120) * near * near)
+            g = Math.min(capMe, g + 160 * heavy * near * near)
           }
           if (!b.free && b.orbR > 0) {
             const bind = Math.abs(b.orbW * b.orbW * b.orbR)
@@ -986,8 +1057,9 @@ export class Voyage {
       this.vz += (dz / d) * g * step
     }
 
-    // 속도 상한 — 화면 1.6장/초. 없으면 거대 스케일에서 섹터 생성 폭주 (프리즈).
-    const vmax = base * 1.6
+    // 속도 상한 — 화면 1.6장/초 (순항 중엔 순항 배율만큼 열린다).
+    // 없으면 거대 스케일에서 섹터 생성 폭주 (프리즈).
+    const vmax = base * 1.6 * Math.max(1, this.cruise)
     const sp0 = Math.hypot(this.vx, this.vy, this.vz)
     if (sp0 > vmax) {
       const k = vmax / sp0
@@ -1046,9 +1118,14 @@ export class Voyage {
         const frac = (0.35 + 0.35 * Math.min(1, R / b.r)) * (gassy ? 1.1 : 1)
         // 에딩턴 캡 — 지수 1.6(R² 이면 공성 중 성장→캡 복리 폭주: 계측 7.5s) +
         // 대상 크기 항(30/(30+r)): 목성(5초권)은 관대하고 태양은 공성전이 된다.
+        // 질량 지배(dom) — 대상의 두 배를 넘는 질량이면 에딩턴은 더 이상 방벽이
+        // 아니다: 별이 통째로 조석 붕괴해 낙하한다. "토성만한 블랙홀(≈태양 수천
+        // 배 질량)이면 태양이고 카이퍼고 찰나"(실플레이)가 이 항이다. 첫 태양
+        // 공성전(내가 가벼울 때 dom=1)은 그대로 남는다 — 성장의 서사는 불변.
+        const dom = Math.max(1, this.vol / (2 * b.r * b.r * b.r))
         const bite = Math.min(
           b.r * b.r * b.r * frac * strength,
-          EDDINGTON * Math.pow(R, 1.6) * (30 / (30 + b.r)) * (1 + this.quasar * 0.5),
+          EDDINGTON * Math.pow(R, 1.6) * (30 / (30 + b.r)) * (1 + this.quasar * 0.5) * dom,
         ) * step
         b.r = Math.cbrt(Math.max(1, b.r * b.r * b.r - bite))
         this.streamIn += bite * ABSORB_GAIN
@@ -1193,8 +1270,11 @@ export class Voyage {
           this.vy += (dy / d) * kb
           this.camera.shake(6, 8)
           this.sfx('hurt')
-        } else if (!bigger && rr < R * EDIBLE && !this.merging) {
-          // 나선낙하 시작 — 즉석 흡수가 아니라 미친 회전으로 감아 돈다 (LIGO)
+        } else if (!bigger && !this.merging) {
+          // 나선낙하 시작 — 즉석 흡수가 아니라 미친 회전으로 감아 돈다 (LIGO).
+          // 나보다 크지만 않으면 전부: 예전엔 0.8R~1.0R 가 물지도 합병하지도
+          // 못하는 사각지대라 그냥 부딪히기만 했다 ("병신같은거": 실플레이).
+          // 실제로도 동급 질량 쌍성 합병이 LIGO 가 처음 들은 소리다 (GW150914).
           this.eaten.add(rv.id)
           this.merging = {
             ang: Math.atan2(rv.y - this.y, rv.x - this.x),
@@ -1332,12 +1412,15 @@ export class Voyage {
     // 거대해진 몸에게 부스러기 화살표는 모욕이다 (실플레이 "동전 위만 보라는 거냐").
     this.preyDist = Infinity
     let crumbDist = Infinity
+    let anyDist = Infinity
     let cX = 0
     let cY = 0
     let cZ = 0
     for (const b of this.active) {
-      if (b.r >= R * EDIBLE || this.eaten.has(b.id)) continue
+      if (this.eaten.has(b.id)) continue
       const d = Math.hypot(b.x - this.x, b.y - this.y, b.z - this.z)
+      if (d - b.r < anyDist) anyDist = d - b.r // 표면 거리 — 순항 게이트용
+      if (b.r >= R * EDIBLE) continue
       if (b.r >= R * 0.12) {
         if (d < this.preyDist) {
           this.preyDist = d
@@ -1357,6 +1440,35 @@ export class Voyage {
       this.preyX = cX
       this.preyY = cY
       this.preyZ = cZ
+    }
+    this.nearAny = anyDist
+    // 다음 항로 — 성찬이 끝난 공허라면 나침반은 별 지도의 다음 목적지를
+    // 가리킨다. "태양 한번 먹고 더 할 게 없어"의 수리: 우주는 안 끝났다고
+    // 화면이 말해야 한다. 이미 삼킨 계는 건너뛴다.
+    this.routeName = null
+    if (this.preyDist > base * 6) {
+      let best = Infinity
+      let bi = -1
+      for (let i = 0; i < STAR_MAP.length; i++) {
+        if (this.eaten.has(MAP_IDS[i]!)) continue
+        const s = STAR_MAP[i]!
+        const d = Math.hypot(s.x - this.x, s.y - this.y, s.z - this.z)
+        if (d < best) {
+          best = d
+          bi = i
+        }
+      }
+      if (bi >= 0) {
+        const s = STAR_MAP[bi]!
+        this.routeName = s.name
+        this.routeDist = best
+        if (this.preyDist === Infinity) {
+          this.preyDist = best
+          this.preyX = s.x
+          this.preyY = s.y
+          this.preyZ = s.z
+        }
+      }
     }
 
     // ── 성간 먼지 유입 — 우주는 다시 채워진다. 이게 없으면 먹은 자리가 판 내내
