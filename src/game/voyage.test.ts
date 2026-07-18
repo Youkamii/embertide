@@ -421,10 +421,10 @@ describe('검은 입', () => {
     g.update(input, 1 / 60)
     expect(g.merging, '나선낙하가 시작됐다').toBeTruthy()
     expect(g.rivals.length, '상대는 궤도에 물렸다').toBe(0)
-    for (let s = 0; s < 300; s++) g.update(input, 1 / 60)
+    for (let s = 0; s < 600; s++) g.update(input, 1 / 60)
     expect(g.merging, '합병이 끝났다').toBeNull()
-    expect(g.waveT, '중력파가 퍼졌다').toBeLessThan(6)
-    expect(g.vol, '질량이 내 것이 됐다').toBeGreaterThan(vol0 * 1.05)
+    expect(g.waveT, '중력파가 퍼졌다').toBeLessThan(11)
+    expect(g.vol, '질량이 내 것이 됐다 (에딩턴 유입은 느긋하다)').toBeGreaterThan(vol0 * 1.02)
   })
 
   it('⑪ 탐욕스럽게 쫓기만 해도 굶지 않는다 — 성장 페이스', () => {

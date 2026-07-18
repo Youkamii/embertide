@@ -46,7 +46,7 @@ const MAW_PULL = 3
  * 커지면 같은 별이 몇 초가 된다 — "커지면 어제 못 삼키던 것을 삼킨다"가 속도로 돌아온다.
  * (무제한이면 첫 태양을 몇 분에 먹고 "더 할 게 없는" 게임이 된다: 실플레이)
  */
-const EDDINGTON = 100
+const EDDINGTON = 560
 /** 로슈 접근 배율 — (R + r) 의 이 배수 안이면 조석 파괴 */
 const ROCHE = 1.3
 /** 삼킨 부피의 성장 환산 배율 */
@@ -925,9 +925,11 @@ export class Voyage {
             b.vz += (dz / d) * gr * step
             if (edibleB) {
               // 원반 평면화 — 먹이의 z 는 내 평면으로 스프링-감쇠 수렴한다.
-              // z 정밀 정렬을 조작에 맡기면 지옥이 된다 (계측: 봇 z 진동 ±760).
-              b.vz += dz * 5 * step
-              b.vz *= Math.exp(-3 * step)
+              // **근접 전용**: 전역으로 걸면 화면 끝 천체들까지 내 평면으로 우수수
+              // 떨어져 보인다 ("멀리 있는 것들 위에서 떨어지는 효과": 실플레이).
+              const zn = (R * 20) / (d + R * 20)
+              b.vz += dz * 5 * zn * zn * step
+              b.vz *= Math.exp(-3 * zn * step)
             }
             // 원반화 점성 — 반경 방향 속도만 죽인다. 궤도 회전은 남고,
             // z 는 내 적도면으로 가라앉는다: 원반은 그렇게 생긴다.
@@ -1018,7 +1020,7 @@ export class Voyage {
     if (this.streamIn > 0.5) {
       const take = Math.min(
         this.streamIn * (1 - Math.exp(-2.2 * step)),
-        EDDINGTON * R * R * 2 * step,
+        EDDINGTON * Math.pow(R, 1.6) * 0.6 * step,
       )
       this.vol += take
       this.streamIn -= take
@@ -1041,11 +1043,12 @@ export class Voyage {
         const gassy = b.kind === BodyKind.Sun || b.kind === BodyKind.Garden || b.kind === BodyKind.Core
         const strength = d <= contact ? 1 : Math.pow(Math.max(0, 1 - (d - contact) / (contact * 2.2)), 2)
         if (strength < 0.03) continue
-        const frac = (0.35 + 0.35 * Math.min(1, R / b.r)) * (gassy ? 1.6 : 1)
-        // 에딩턴 캡 — 지구·목성은 여전히 순식간, 태양은 작을 땐 공성전
+        const frac = (0.35 + 0.35 * Math.min(1, R / b.r)) * (gassy ? 1.1 : 1)
+        // 에딩턴 캡 — 지수 1.6(R² 이면 공성 중 성장→캡 복리 폭주: 계측 7.5s) +
+        // 대상 크기 항(30/(30+r)): 목성(5초권)은 관대하고 태양은 공성전이 된다.
         const bite = Math.min(
           b.r * b.r * b.r * frac * strength,
-          EDDINGTON * R * R * (1 + this.quasar * 1.5),
+          EDDINGTON * Math.pow(R, 1.6) * (30 / (30 + b.r)) * (1 + this.quasar * 0.5),
         ) * step
         b.r = Math.cbrt(Math.max(1, b.r * b.r * b.r - bite))
         this.streamIn += bite * ABSORB_GAIN
