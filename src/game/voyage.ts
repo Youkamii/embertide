@@ -948,21 +948,32 @@ export class Voyage {
     for (const b of this.active) {
       if (b.r < R || this.eaten.has(b.id)) continue
       const d = Math.hypot(b.x - this.x, b.y - this.y, b.z - this.z)
-      if (d < (R + b.r) * 1.03) {
-        // 잠식은 비율제 — 접촉하면 초당 35~70% 씩 무너진다. 땅콩만 해도 블랙홀은
-        // 블랙홀이다: 지구 1~2초, 목성 2~4초 ("목성부터 하루 종일" 판정의 수리).
-        const frac = 0.35 + 0.35 * Math.min(1, R / b.r)
-        const bite = b.r * b.r * b.r * frac * step
+      const contact = (R + b.r) * 1.03
+      if (d < contact * 3.2) {
+        // 원거리 조석 박리 — 시그너스 X-1 처럼, 곁에 있는 것만으로 별이 가스를
+        // 흘리기 시작한다. 가까울수록 격렬해지고 접촉이면 초당 35~70% 붕괴.
+        // 가스체(항성·성운)는 단단한 돌보다 잘 뜯긴다.
+        const gassy = b.kind === BodyKind.Sun || b.kind === BodyKind.Garden || b.kind === BodyKind.Core
+        const strength = d <= contact ? 1 : Math.pow(Math.max(0, 1 - (d - contact) / (contact * 2.2)), 2)
+        if (strength < 0.03) continue
+        const frac = (0.35 + 0.35 * Math.min(1, R / b.r)) * (gassy ? 1.6 : 1)
+        const bite = b.r * b.r * b.r * frac * strength * step
         b.r = Math.cbrt(Math.max(1, b.r * b.r * b.r - bite))
         this.streamIn += bite * ABSORB_GAIN
-        this.feed = Math.max(this.feed, 0.4)
+        this.feed = Math.max(this.feed, 0.25 + strength * 0.5)
         if (this.nibbleCd <= 0) {
-          this.nibbleCd = 0.13
+          this.nibbleCd = 0.11
+          // 가스는 내 쪽으로 뜯겨 나와 접선으로 감긴다 — 빙빙 도는 강착류
           const a = Math.atan2(this.y - b.y, this.x - b.x)
+          const ex = b.x + Math.cos(a) * b.r
+          const ey = b.y + Math.sin(a) * b.r
           this.spawnGas(
-            b.x + Math.cos(a) * b.r, b.y + Math.sin(a) * b.r, b.z,
-            Math.cos(a + 1.2) * R * 6, Math.sin(a + 1.2) * R * 6, 0,
-            Math.max(4, R * 0.8), Math.min(1.3, b.cr * 1.3), b.cg * 0.8, b.cb * 0.6, 1.1,
+            ex, ey, b.z + (this.z - b.z) * 0.3,
+            Math.cos(a + 1.35) * R * 5 + (this.x - ex) * 0.6,
+            Math.sin(a + 1.35) * R * 5 + (this.y - ey) * 0.6,
+            (this.z - b.z) * 0.4,
+            Math.max(4, gassy ? b.r * 0.16 : R * 0.8),
+            Math.min(1.3, b.cr * 1.3), b.cg * 0.85, b.cb * 0.6, 1.4 + strength * 0.8,
           )
         }
       }
