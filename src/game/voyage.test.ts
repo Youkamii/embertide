@@ -428,11 +428,12 @@ describe('검은 입', () => {
     expect(g.vol, '질량이 내 것이 됐다 (에딩턴 유입은 느긋하다)').toBeGreaterThan(vol0 * 1.02)
   })
 
-  it('⑳ 몸은 영구히 점이다 — 뭘 먹어도 화면상 크기는 사실상 불변 (실물리: 태양=3km)', () => {
+  it('⑳ 슈바르츠실트 성장 — 항성질량은 점, 초대질량은 위용 (r_s ∝ 질량)', () => {
     expect(bodyRof(1.8), '시작 몸 — 점').toBeLessThan(0.7)
-    expect(bodyRof(90), '태양을 삼켜도 점 (시작의 2배 미만)').toBeLessThan(bodyRof(1.8) * 2)
-    expect(bodyRof(90)).toBeGreaterThan(bodyRof(30))
-    expect(bodyRof(1500), '은하심급이 되어도 점').toBeLessThan(2.5)
+    expect(bodyRof(90), '태양 84개를 먹어도 아직 점').toBeLessThan(0.7)
+    expect(bodyRof(300), '수백 태양질량부턴 몸이 보이게 자란다').toBeGreaterThan(5)
+    expect(bodyRof(300)).toBeGreaterThan(bodyRof(150))
+    expect(bodyRof(1500), '초대질량 — 몸이 영향권을 가득 채운다').toBeCloseTo(1500, 0)
   })
 
   it('㉑ 탈출 불변식 — 방치해도 태양에 안 처박히고, 붙잡혀도 추진으로 나온다', () => {

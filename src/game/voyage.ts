@@ -85,11 +85,13 @@ export function bhRadius(vol: number): number {
  * R90에서 몸 12.6(영향권의 1/7), R1500에서 41(1/36).
  */
 export function bodyRof(radius: number): number {
-  // 몸은 **영구히 점이다** — 태양질량 블랙홀 반지름 2.95km = 이 게임 눈금
-  // (1px≈700km)으로 0.004px. 즉 뭘 먹어도 화면상 크기 변화는 물리적으로 0이
-  // 맞다 ("먹고도 크기가 바뀐다는 것부터가 이해가 안 돼": 실플레이 확정).
-  // 게임 내내 0.6 → 2 (최소 가시성만) — 존재감은 렌즈 그림자·원반·은하가 낸다.
-  return Math.min(radius, 0.6 + 0.4 * Math.log1p(radius / 40))
+  // **진짜 슈바르츠실트 눈금** — r_s ∝ 질량(선형). 태양 84개(R90)를 먹어도
+  // 0.35px 점이지만, ~140 태양질량부터 눈에 보이기 시작해 ~12만 태양질량
+  // (R≈554)에서 영향권을 따라잡는다 — 그때부터 몸이 곧 영향권: 초대질량의
+  // 위용이다 (궁수자리 A* = 태양 반지름 18배 — 실물리).
+  // "안 커진다가 아니라 커지는 방식이 틀렸다"(실플레이)의 정답 곡선.
+  // 계수 5.8e-9 = (2.95km/태양질량 729,000vol) ÷ (700km/px).
+  return Math.min(radius, Math.max(0.5, volFor(radius) * 5.8e-9))
 }
 /** 조석 파괴에서 가스 스트림으로 흘러드는 비율 — 통째보다 손해: 조급함의 세금 */
 const SHRED_STREAM = 0.75
@@ -812,14 +814,39 @@ export class Voyage {
         b.free = true
         list.push(b)
       }
-      // 16광년 너머 — 일반 항성 들판 (지도의 명소들 사이를 메우는 실재의 배경)
+      // 16광년 너머 — 일반 항성 들판. 분광형은 실제 빈도를 따른다: 우주의
+      // 다수는 적색왜성(M)이고, 청색 초거성은 귀하다 ("적색왜성 청색왜성
+      // 이런 건 왜 없어": 실플레이).
       if (rC > pxOf(16) && rng.next() < 0.07) {
         const id = hashSeed(`${seed}:fs`)
-        const big = rC > pxOf(600)
+        const far = rC > pxOf(600)
+        const roll = rng.next()
+        let sr: number
+        let scr: number
+        let scg: number
+        let scb: number
+        if (roll < 0.55) {
+          sr = 40 + rng.next() * 55 // M 적색왜성 — 우주의 다수
+          scr = 1.2; scg = 0.5; scb = 0.32
+        } else if (roll < 0.72) {
+          sr = 65 + rng.next() * 60 // K 주황왜성
+          scr = 1.5; scg = 0.9; scb = 0.5
+        } else if (roll < 0.84) {
+          sr = 85 + rng.next() * 70 // G 노란별 — 태양형
+          scr = 1.8; scg = 1.5; scb = 0.75
+        } else if (roll < 0.93) {
+          sr = 115 + rng.next() * 130 // A·B 청백색
+          scr = 1.6; scg = 1.7; scb = 2.0
+        } else if (roll < 0.985) {
+          sr = far ? 420 + rng.next() * 700 : 260 + rng.next() * 340 // 적색거성
+          scr = 1.9; scg = 0.85; scb = 0.4
+        } else {
+          sr = far ? 600 + rng.next() * 900 : 400 + rng.next() * 500 // 청색 초거성
+          scr = 1.0; scg = 1.2; scb = 2.2
+        }
         const b = this.newBody(id, BodyKind.Sun,
           sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
-          big ? 200 + rng.next() * 900 : 60 + rng.next() * 240,
-          0.9 + rng.next(), 0.7 + rng.next() * 0.8, 0.4 + rng.next() * 0.9)
+          sr, scr, scg, scb)
         b.z = (rng.next() - 0.5) * 6000
         list.push(b)
         if (rng.next() < 0.5) {

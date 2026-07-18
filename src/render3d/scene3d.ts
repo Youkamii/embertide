@@ -459,11 +459,13 @@ void main(){
       this.scene.add(ring)
     }
 
-    // 랜드마크 별점 + 이름 라벨
+    // 랜드마크 별점 + 이름 라벨 — 성운·은하는 하늘의 뿌연 얼룩으로 항상 보인다
+    // ("은하도 성운도 없어": 실플레이 — 지도엔 있는데 하늘에서 안 읽혔다)
     for (let i = 0; i < STAR_MAP.length; i++) {
       const sys = STAR_MAP[i]!
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: glowTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
+        map: sys.kind === 'sun' ? glowTex : smokeTex,
+        blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
       }))
       sp.material.color.setRGB(
         Math.min(1, sys.cr * 0.8), Math.min(1, sys.cg * 0.8), Math.min(1, sys.cb * 0.8),
@@ -593,9 +595,9 @@ void main(){
       }
       sp.visible = true
       sp.position.set(px + (dx / d3) * skyR, py + (dy / d3) * skyR, pz + (dz / d3) * skyR)
-      const imp = sys.kind === 'core' ? 2.6 : sys.kind === 'garden' ? 1.7 : 1
+      const imp = sys.kind === 'core' ? 6 : sys.kind === 'garden' ? 4 : 1
       sp.scale.setScalar(skyR * 0.01 * imp)
-      sp.material.opacity = 0.6
+      sp.material.opacity = sys.kind === 'sun' ? 0.6 : 0.38
       // 라벨 — 화면 안에 있고 가까운 순 다섯
       if (labelN < 5) {
         this.v3.copy(sp.position).project(this.camera)
@@ -669,14 +671,18 @@ void main(){
           break
         }
       }
-      // 지각 계층 — 큰 천체는 최소 각크기를 보장한다: 멀어도 태양은 불덩이,
-      // 행성은 구체다 ("ㅈ만해지고 희무끄레한 이상한 형태": 실플레이). 다가가면
+      // 지각 계층 — 모든 천체는 최소 각크기를 보장한다: 멀어도 태양은 불덩이,
+      // 행성은 구체, **카이퍼·오르트 얼음도 티끌 반짝임**으로는 보인다 ("카이퍼
+      // 벨트도 없어": 실플레이 — 있는데 서브픽셀이라 안 보였다). 다가가면
       // 실크기가 자연히 이긴다 (원근 거짓말은 낮은 θ 로 억제).
-      if (b.r >= R * 1.25 && redK === 0) {
+      if (redK === 0) {
         const dCam = Math.hypot(
           ax - this.camera.position.x, ay - this.camera.position.y, az - this.camera.position.z,
         )
-        const theta = b.kind === BodyKind.Sun ? 0.045 : b.kind === BodyKind.Garden || b.kind === BodyKind.Core ? 0.06 : 0.022
+        const theta = b.r >= R * 1.25
+          ? b.kind === BodyKind.Sun ? 0.045
+            : b.kind === BodyKind.Garden || b.kind === BodyKind.Core ? 0.06 : 0.022
+          : 0.0035
         sc = Math.max(sc, dCam * theta)
       }
       this.v3.set(ax, ay, az)
