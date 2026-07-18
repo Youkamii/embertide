@@ -220,10 +220,11 @@ export class Voyage {
   private waveX = 0
   private waveY = 0
   private waveT = 1e9
-  private preyX = 0
-  private preyY = 0
-  private preyZ = 0
-  private preyDist = Infinity
+  /** 나침반 대상 — 3D 렌더러(main)가 화면 화살표로 그린다 */
+  preyX = 0
+  preyY = 0
+  preyZ = 0
+  preyDist = Infinity
 
   private readonly gas: Gas[] = []
   private gasIdx = 0
@@ -754,11 +755,12 @@ export class Voyage {
     // 항력 — 추진 중엔 낮고, 놓으면 강하다 ("브레이크 없는 엑셀" 판정의 수리).
     // z 는 따로: 상승키를 놓으면 수직 흐름이 빨리 죽는다 — 층 이동은 탭으로 끝나야
     // 하고, 진동하면 조작 지옥이다 (계측: 봇 z ±760 발진).
-    const dragK = this.thrusting ? 0.14 : 0.6
+    // 활공 0.3 — "적당히 미끄러져야지": 0.6 은 급정거였고 0.1 은 브레이크가 없었다
+    const dragK = this.thrusting ? 0.14 : 0.3
     const drag = Math.exp(-dragK * step)
     this.vx *= drag
     this.vy *= drag
-    this.vz *= Math.exp(-(lift !== 0 ? 0.14 : 0.9) * step)
+    this.vz *= Math.exp(-(lift !== 0 ? 0.14 : 0.5) * step)
 
     // ── 천체 물리 한 패스: 레일(3D) → 내 중력(섭동·틀 끌림·원반화 점성) → 자유체.
     for (const b of this.active) {
