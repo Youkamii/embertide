@@ -83,19 +83,27 @@ describe('검은 입', () => {
     expect(g.journal.length, '명부에 남았다').toBeGreaterThan(0)
   })
 
-  it('③ 나보다 큰 것은 못 삼킨다', () => {
+  it('③ 나보다 큰 것은 한입에 못 삼킨다 — 대신 곁에서 뜯는다', () => {
     const g = new Voyage()
     g.start(null)
     const big = g.active.find((b) => b.r > g.radius * 2)
     expect(big, '큰 천체가 있다 (태양)').toBeTruthy()
     const input = mockInput(0, 0)
-    for (let s = 0; s < 60; s++) {
+    g.x = big!.x + big!.r * 1.05
+    g.y = big!.y
+    g.z = big!.z
+    g.update(input, 1 / 60)
+    // 한입 삼킴은 없다 — 첫 틱에 통째로 사라지지 않는다
+    expect(g.active.some((b) => b.id === big!.id), '첫 틱에 통째로는 안 삼켜진다').toBe(true)
+    const r0 = big!.r
+    for (let s = 0; s < 20; s++) {
       g.x = big!.x + big!.r * 1.05
       g.y = big!.y
       g.z = big!.z
       g.update(input, 1 / 60)
     }
-    expect(g.active.some((b) => b.id === big!.id), '큰 천체는 그대로 있다').toBe(true)
+    // 대신 곁에 있으면 뜯긴다 (원거리 조석 박리 — 시그너스 X-1)
+    expect(big!.r, '곁에 있으면 뜯긴다').toBeLessThan(r0)
   })
 
   it('④ 항해는 판마다 새로 시작하고, 명부만 평생 남는다', () => {
