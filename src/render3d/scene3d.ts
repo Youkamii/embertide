@@ -1436,7 +1436,7 @@ void main(){
     }
     this.disk.position.set(px, py, pz)
     // 원반도 몸 눈금 — 영향권(R) 눈금이면 티끌 곁에서 화면을 덮는다
-    this.disk.scale.setScalar(Math.min(R, BR * 3))
+    this.disk.scale.setScalar(Math.min(R, BR * 3) * Math.max(0.001, g.morph))
     this.diskMat.uniforms['uTime']!.value = t
     this.diskMat.uniforms['uFeed']!.value = Math.min(1, g.feed + g.quasar * 0.7)
     this.diskMat.uniforms['uInner']!.value = Math.max(0.03, (BR / R) * 1.2)
@@ -1470,8 +1470,9 @@ void main(){
     // 휴면 블랙홀은 티끌이다 — 그림자·왜곡을 작게, 성장(질량)에만 비례해 커진다
     // ("지금도 크잖아": 몸이 아니라 이 장식들이 컸다)
     const screenK = Math.tan((this.camera.fov * Math.PI) / 360) * dist * 2
-    this.lensPass.uniforms['uR']!.value = Math.max(0.003, (BR * 0.6) / screenK)
-    this.lensPass.uniforms['uE']!.value = Math.max(0.008, (BR + (R - BR) * 0.18) / screenK)
+    // 붕괴 중엔 렌즈도 태아다 — 그림자·왜곡이 morph 로 차오른다
+    this.lensPass.uniforms['uR']!.value = Math.max(0.003, (BR * 0.6 * g.morph) / screenK)
+    this.lensPass.uniforms['uE']!.value = Math.max(0.008, ((BR + (R - BR) * 0.18) * g.morph) / screenK)
     this.lensPass.uniforms['uAspect']!.value = w / h
     this.lensPass.uniforms['uQuasar']!.value = g.quasar
     // 중력파 → 렌즈 물결

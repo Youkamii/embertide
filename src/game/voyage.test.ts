@@ -86,6 +86,7 @@ describe('검은 입', () => {
   it('③ 나보다 큰 것은 한입에 못 삼킨다 — 대신 곁에서 뜯는다', () => {
     const g = new Voyage()
     g.start(null)
+    ;(g as unknown as { runT: number }).runT = 33 // 붕괴 완료 — 성숙한 블랙홀의 힘
     const big = g.active.find((b) => b.r > g.radius * 2)
     expect(big, '큰 천체가 있다 (태양)').toBeTruthy()
     const input = mockInput(0, 0)
@@ -175,6 +176,7 @@ describe('검은 입', () => {
     expect(moon, '달이 있다').toBeTruthy()
     const host = moon!.host!
     g.vol = volFor(host.r * 2)
+    ;(g as unknown as { runT: number }).runT = 33 // 붕괴 완료 — 섭동은 성숙한 힘
     const input = mockInput(0, 0)
     for (let s = 0; s < 30; s++) {
       g.x = moon!.x + g.radius * 1.9
@@ -196,6 +198,7 @@ describe('검은 입', () => {
     expect(target, '대상 천체가 있다 (천왕성쯤)').toBeTruthy()
     const R = target!.r / 0.9
     g.vol = volFor(R)
+    ;(g as unknown as { runT: number }).runT = 33 // 붕괴 완료 — 조석은 성숙한 힘
     g.x = target!.x + (R + target!.r) * 1.1
     g.y = target!.y
     g.z = target!.z
@@ -380,6 +383,7 @@ describe('검은 입', () => {
     g.start(null)
     const venus = g.active.find((b) => nameOf(b.id)?.name === '금성')!
     g.vol = volFor(2) // 땅콩 — 지구 시작 질량을 내려놓고 잠식만 잰다
+    ;(g as unknown as { runT: number }).runT = 33 // 붕괴 완료 — 잠식은 성숙한 힘
     const r0 = venus.r
     const vol0 = g.vol
     const input = mockInput(0, 0)

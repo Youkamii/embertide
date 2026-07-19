@@ -1244,7 +1244,10 @@ export class Voyage {
       // 거꾸로다: 태양 84개 질량이 지름 큰 별한테 무시당했다 ("큰 것들은
       // 오지도 않아": 실플레이). 내가 무거워지는 순간 태양도 나에게 떨어진다.
       // **사거리 컷 없음**: 중력은 모든 공간에 미친다. 1/r² 이 자연 감쇠다.
-      if (b.r * b.r * b.r < volE) {
+      // 지구는 빨아들이지 않는다 — 블랙홀의 힘은 붕괴 진행(morph)의 제곱으로
+      // 차오른다: 시작 0, 30초에 1 ("시작부터 주변 모든 걸 빨아들이네": 실플레이).
+      const mK = this.morph * this.morph
+      if (mK > 0.0005 && b.r * b.r * b.r < volE) {
         const dx = this.x - b.x
         const dy = this.y - b.y
         const dz = this.z - b.z
@@ -1262,7 +1265,7 @@ export class Voyage {
           const grip = 1 + 2 * Math.min(1, R / 12)
           const heavy = (1 + R / 60) * grip * surgeK
           const capMe = PULL_CAP_BY_ME * (1 + R / 80) * (0.8 + 0.6 * grip) * surgeK
-          let g = Math.min(capMe, (R * R * GRAV * MAW_PULL * heavy) / d2)
+          let g = Math.min(capMe, (R * R * GRAV * MAW_PULL * heavy) / d2) * mK
           // 동역학 마찰 항적 (조사 ㉒, Chandrasekhar): 내가 지나간 뒤편의 것들이
           // 항적 밀도에 끌려 뒤늦게 따라 떨어진다 — 후방 보정 (경량판)
           if ((b.x - this.x) * this.vx + (b.y - this.y) * this.vy < 0) g *= 1.18
@@ -1270,7 +1273,7 @@ export class Voyage {
           // ("내가 쟤 위치까지 가야만 따라와": 실플레이 — 사거리 R·20→R·34)
           if (edibleB) {
             const near = (R * 34) / (d + R * 34)
-            g = Math.min(capMe, g + 320 * heavy * near * near) // 흡입 상향 (실플레이)
+            g = Math.min(capMe, g + 320 * heavy * near * near * mK) // 흡입 상향 (실플레이)
           }
           if (!b.free && b.orbR > 0) {
             const bind = Math.abs(b.orbW * b.orbW * b.orbR)
@@ -1292,7 +1295,7 @@ export class Voyage {
               const rvxE = b.vx - this.vx
               const rvyE = b.vy - this.vy
               const tv = rvxE * txE + rvyE * tyE
-              const kE = 1 - Math.exp(-8 * step)
+              const kE = (1 - Math.exp(-8 * step)) * mK
               const want = Math.abs(tv)
               b.vx += (txE * want - (rvxE * txE) * txE) * kE * (tv < 0 ? 2 : 0)
               b.vy += (tyE * want - (rvyE * tyE) * tyE) * kE * (tv < 0 ? 2 : 0)
@@ -1308,8 +1311,8 @@ export class Voyage {
               // **근접 전용**: 전역으로 걸면 화면 끝 천체들까지 내 평면으로 우수수
               // 떨어져 보인다 ("멀리 있는 것들 위에서 떨어지는 효과": 실플레이).
               const zn = (R * 20) / (d + R * 20)
-              b.vz += dz * 5 * zn * zn * step
-              b.vz *= Math.exp(-3 * zn * step)
+              b.vz += dz * 5 * zn * zn * step * mK
+              b.vz *= Math.exp(-3 * zn * step * mK)
             }
             // 원반화 점성 — 반경 방향 속도만 죽인다. 궤도 회전은 남고,
             // z 는 내 적도면으로 가라앉는다: 원반은 그렇게 생긴다.
@@ -1330,19 +1333,19 @@ export class Voyage {
             const domV = Math.min(6, volE / (b.r * b.r * b.r + 1))
             const vr = vr0 > 0
               ? vr0
-              : vr0 * Math.exp(-step * 5 * proxV * (1 + domV) * (this.surge ? 30 : 1))
+              : vr0 * Math.exp(-step * mK * 5 * proxV * (1 + domV) * (this.surge ? 30 : 1))
             // 각운동량 사형선고 — 슈바르츠실트 포획은 거리가 아니라 각운동량
             // 조건이다 (L < 4GM/c 이면 반드시 낙하: 조사 A). 게임 눈금 근사.
-            if (!b.doomed && d < R * 24 && vr0 < 0) {
+            if (!b.doomed && mK >= 1 && d < R * 24 && vr0 < 0) {
               const Lz = Math.abs(dx * rvy - dy * rvx)
               if (Lz < R * Math.sqrt(GRAV * MAW_PULL * R) * 0.5) b.doomed = true
             }
             // 강착 나선 — 접선 마찰이 각운동량을 갉아 "돌다가 점점 안으로"
             // 감겨 들어온다 (실플레이 "언제까지 돌 건데"). 질량 지배·근접 비례.
-            const kt = Math.exp(-step * (0.35 + 0.45 * domV) * proxV * proxV)
+            const kt = Math.exp(-step * mK * (0.35 + 0.45 * domV) * proxV * proxV)
             let tx = (rvx - (rvx * ux + rvy * uy + rvz * uz) * ux) * kt
             let ty = (rvy - (rvx * ux + rvy * uy + rvz * uz) * uy) * kt
-            let tz = (rvz - (rvx * ux + rvy * uy + rvz * uz) * uz) * Math.exp(-step * 2.2 * prox)
+            let tz = (rvz - (rvx * ux + rvy * uy + rvz * uz) * uz) * Math.exp(-step * mK * 2.2 * prox)
             b.vx = this.vx + ux * vr + tx - ux * (tx * ux + ty * uy + tz * uz)
             b.vy = this.vy + uy * vr + ty - uy * (tx * ux + ty * uy + tz * uz)
             b.vz = this.vz + uz * vr + tz - uz * (tx * ux + ty * uy + tz * uz)
@@ -1360,7 +1363,7 @@ export class Voyage {
                 // 접선 가속 → 원심 이탈 ("과부하 걸면 멀어져": 실플레이 확정).
                 // 원형화는 빠른 놈을 늦출 뿐, 절대 밀어 올리지 않는다.
                 const want = Math.min(tmag, Math.sqrt(Math.max(1, g * d)) * 0.96)
-                const kC = 1 - Math.exp(-(1.2 + domV) * proxV * step)
+                const kC = 1 - Math.exp(-(1.2 + domV) * proxV * step * mK)
                 const scl = 1 + (want / tmag - 1) * kC
                 b.vx = this.vx + ux * rad2 + ttx * scl
                 b.vy = this.vy + uy * rad2 + tty * scl
@@ -1535,7 +1538,10 @@ export class Voyage {
     // 나보다 큰 것도 몸이 닿으면 표면이 깎여 스트림으로 흘러들어온다.
     // 속도는 내 단면적(R²) 비례 — 작을 땐 스멀스멀, 클수록 험악하게.
     this.nibbleCd -= step
+    // 잠식도 붕괴 진행을 따른다 — 지구는 태양을 갉지 못한다 (morph²)
+    const mKe = this.morph * this.morph
     for (const b of this.active) {
+      if (mKe <= 0.0005) break
       if (b.r < R || this.eaten.has(b.id)) continue
       const d = Math.hypot(b.x - this.x, b.y - this.y, b.z - this.z)
       const contact = (R + b.r) * 1.03
@@ -1546,7 +1552,9 @@ export class Voyage {
         const gassy = b.kind === BodyKind.Sun || b.kind === BodyKind.Garden || b.kind === BodyKind.Core
         const strength = d <= contact ? 1 : Math.pow(Math.max(0, 1 - (d - contact) / (contact * 2.2)), 2)
         if (strength < 0.03) continue
-        const frac = (0.35 + 0.35 * Math.min(1, R / b.r)) * (gassy ? 1.1 : 1)
+        // 체급 격차가 %율을 지배해야 위계가 산다 — 베이스 0.35 는 목성·태양
+        // 공성 시간을 동률로 만들었다 (계측 R15: 3.43 vs 3.42s — 질량 45배 소멸)
+        const frac = (0.18 + 0.62 * Math.min(1, R / b.r)) * (gassy ? 1.1 : 1)
         // 에딩턴 캡 — 지수 1.6(R² 이면 공성 중 성장→캡 복리 폭주: 계측 7.5s) +
         // 대상 크기 항(30/(30+r)): 목성(5초권)은 관대하고 태양은 공성전이 된다.
         // 질량 지배(dom) — 대상의 두 배를 넘는 질량이면 에딩턴은 더 이상 방벽이
@@ -1567,7 +1575,7 @@ export class Voyage {
         const bite = Math.min(
           b.r * b.r * b.r * frac * strength,
           EDDINGTON * Math.pow(R, 1.6) * Math.pow(30 / (30 + b.r), 1.4) * (1 + this.quasar * 0.5) * dom,
-        ) * step
+        ) * step * mKe
         b.r = Math.cbrt(Math.max(1, b.r * b.r * b.r - bite))
         this.streamIn += bite * ABSORB_GAIN
         this.feed = Math.max(this.feed, 0.25 + strength * 0.5)
@@ -1577,8 +1585,10 @@ export class Voyage {
           continue
         }
         // 행성 붕괴 — 절반을 뜯긴 행성은 조석 불안정으로 무너진다. 이게 없으면
-        // 목성을 100% 갈아야 해서 태양(55% 초신성)보다 오래 걸리는 역전 (계측)
-        if (b.kind !== BodyKind.Sun && b.kind !== BodyKind.Core && b.r < b.r0 * 0.55 && b.r0 > 24) {
+        // 목성을 100% 갈아야 해서 태양(55% 초신성)보다 오래 걸리는 역전 (계측).
+        // 문턱 r0>8 — 24로 두면 금성급(14.8)만 100% 갈아야 해서 목성보다 오래
+        // 걸리는 소형 역전이 생긴다 (계측 R1.8: 금성 2.6s > 목성 1.4s)
+        if (b.kind !== BodyKind.Sun && b.kind !== BodyKind.Core && b.r < b.r0 * 0.55 && b.r0 > 8) {
           this.eaten.add(b.id)
           const bi = this.active.indexOf(b)
           if (bi >= 0) this.active.splice(bi, 1)
@@ -1628,7 +1638,8 @@ export class Voyage {
       // 찢기지 않고 **소리 없이 통째로** 사라진다 (조사 ②-12, ~10⁸M☉ 상전이).
       // 파괴의 미학이 화려함에서 소름끼치는 정적으로 반전되는 순간.
       const rT = (R + b.r) * ROCHE * rocheOf(b.kind)
-      if (d < rT) {
+      // 조석 파괴는 완성된 블랙홀의 것 — 붕괴 중의 지구는 찢지 못한다
+      if (d < rT && this.morph >= 1) {
         if (rT < bodyRof(R) * 2.6) {
           this.eaten.add(b.id)
           const qi = this.active.indexOf(b)
