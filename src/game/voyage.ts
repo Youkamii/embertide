@@ -1307,6 +1307,23 @@ export class Voyage {
             b.vx = this.vx + ux * vr + tx - ux * (tx * ux + ty * uy + tz * uz)
             b.vy = this.vy + uy * vr + ty - uy * (tx * ux + ty * uy + tz * uz)
             b.vz = this.vz + uz * vr + tz - uz * (tx * ux + ty * uy + tz * uz)
+            // 원형화 — 타원 포획은 "줄었다 늘었다" 숨을 쉰다 (실플레이). 깊이
+            // 잡힌 것은 속도를 국소 원궤도의 96%로 다듬어 매끈한 나선로 만든다.
+            if ((b.doomed || domV > 1.5) && proxV > 0.3) {
+              const rvx2 = b.vx - this.vx
+              const rvy2 = b.vy - this.vy
+              const rad2 = rvx2 * ux + rvy2 * uy
+              const ttx = rvx2 - ux * rad2
+              const tty = rvy2 - uy * rad2
+              const tmag = Math.hypot(ttx, tty)
+              if (tmag > 1) {
+                const want = Math.sqrt(Math.max(1, g * d)) * 0.96
+                const kC = 1 - Math.exp(-(1.2 + domV) * proxV * step)
+                const scl = 1 + (want / tmag - 1) * kC
+                b.vx = this.vx + ux * rad2 + ttx * scl
+                b.vy = this.vy + uy * rad2 + tty * scl
+              }
+            }
           }
         }
       }
