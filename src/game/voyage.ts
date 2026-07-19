@@ -696,14 +696,19 @@ export class Voyage {
     // 은하 앵커는 **중심 블랙홀**(질량의 심), 성운 앵커는 심 구름 하나,
     // 성단 앵커는 핵이고, 나머지 질량은 아래에서 실제 천체들로 흩어진다.
     const isGal = sys.kind === 'core' && sys.r >= 8000 && sys.name !== '궁수자리 A*'
+    // M33·SMC 는 중심 블랙홀이 없다 (조사 [확인]: M33 은 SMBH 없는 최대 은하,
+    // 상한 1.5~3천 Msun) — 앵커는 블랙홀이 아니라 핵성단(항성)이다.
+    const noBH = sys.name === '삼각형자리 은하' || sys.name === '작은 마젤란 은하'
     const anchorR = isGal
-      ? sys.r * 0.5
+      ? noBH ? 320 : sys.r * (sys.name === '큰 마젤란 은하' ? 0.35 : 0.5)
       : sys.kind === 'garden' && sys.r > 0
-        ? Math.max(60, sys.r * 0.3)
+        ? sys.name === '베일 성운'
+          ? 80 // 잔해에 중심 엔진은 없다 (조사 [확인]) — 라벨 닻만 남긴다
+          : Math.max(60, sys.r * 0.3)
         : sys.kind === 'garden' && sys.r === 0
           ? (sys.ly > 1000 ? 1400 : 220)
           : Math.max(60, sys.r)
-    const star = this.newBody(id, kind, sys.x, sys.y, anchorR, sys.cr, sys.cg, sys.cb)
+    const star = this.newBody(id, noBH ? BodyKind.Sun : kind, sys.x, sys.y, anchorR, sys.cr, sys.cg, sys.cb)
     star.z = sys.z
     registerName(id, sys.name, '')
     list.push(star)
@@ -758,31 +763,136 @@ export class Voyage {
         list.push(cb2)
       }
     }
-    // 성운은 별의 요람이자 **지역**이다 — 가스 덩어리 여럿이 수 광년에 흩어져
-    // 있고 그 속에서 어린 별들이 태어난다 ("왜 하나의 오브젝트여야 해": 실플레이)
+    // 성운은 유형별 **지역**이다 (조사 12기 종합) — HII 는 블리스터 거품
+    // (엔진 성단+공동+벽+기둥), 행성상은 백색왜성+동심 고리, 잔해는 필라멘트.
     if (kind === BodyKind.Garden && sys.r > 0) {
-      const clumpN = 12
-      for (let i = 0; i < clumpN; i++) {
-        const cId3 = hashSeed(`map:${sys.name}:cloud:${i}`)
-        const cr3 = sys.r * (0.3 + rng.next() * 0.2)
-        const cl = this.newBody(cId3, BodyKind.Garden,
-          sys.x + (rng.next() - 0.5) * sys.r * 2.4,
-          sys.y + (rng.next() - 0.5) * sys.r * 2.4, cr3,
-          Math.min(1.2, sys.cr * (0.85 + rng.next() * 0.3)),
-          Math.min(1.1, sys.cg * (0.85 + rng.next() * 0.3)), sys.cb)
-        cl.z = sys.z + (rng.next() - 0.5) * sys.r * 0.8
-        cl.origin = sys.name
-        list.push(cl)
+      const planetary = sys.name === '헬릭스 성운' || sys.name === '고리 성운'
+      const snrCrab = sys.name === '게 성운'
+      const snrVeil = sys.name === '베일 성운'
+      const gasBody = (tag: string, gx: number, gy: number, gz: number, gr: number,
+        c1: number, c2: number, c3: number): void => {
+        const gb = this.newBody(hashSeed(`map:${sys.name}:${tag}`), BodyKind.Garden,
+          gx, gy, gr, c1, c2, c3)
+        gb.z = gz
+        gb.origin = sys.name
+        list.push(gb)
       }
-      const n = 18
-      for (let i = 0; i < n; i++) {
-        const sId = hashSeed(`map:${sys.name}:yso:${i}`)
-        const sr = 14 + rng.next() * 50
-        const s = this.newBody(sId, BodyKind.Sun,
-          sys.x + (rng.next() - 0.5) * sys.r * 2.0,
-          sys.y + (rng.next() - 0.5) * sys.r * 2.0, sr, 0.85, 0.8, 1.35)
-        s.z = sys.z + (rng.next() - 0.5) * sys.r * 0.6
-        list.push(s)
+      if (planetary) {
+        // 중심 백색왜성 — 죽은 별의 심장, 작고 초고온 청백 (조사 [확인] 120,000K)
+        const wd = this.newBody(hashSeed(`map:${sys.name}:wd`), BodyKind.Sun,
+          sys.x, sys.y, 11, 0.86, 0.92, 1.3)
+        wd.z = sys.z
+        wd.origin = sys.name
+        list.push(wd)
+        // 동심 이중 고리 — 안쪽 청록(OIII), 바깥 적색(Hα) (조사 [확인])
+        for (let i = 0; i < 6; i++) {
+          const a = (i / 6) * Math.PI * 2 + rng.next() * 0.3
+          gasBody(`ringIn:${i}`, sys.x + Math.cos(a) * sys.r * 0.5,
+            sys.y + Math.sin(a) * sys.r * 0.5, sys.z + (rng.next() - 0.5) * sys.r * 0.2,
+            sys.r * (0.16 + rng.next() * 0.08), 0.35, 0.9, 0.82)
+        }
+        for (let i = 0; i < 10; i++) {
+          const a = (i / 10) * Math.PI * 2 + rng.next() * 0.25
+          gasBody(`ringOut:${i}`, sys.x + Math.cos(a) * sys.r * 0.85,
+            sys.y + Math.sin(a) * sys.r * 0.85, sys.z + (rng.next() - 0.5) * sys.r * 0.25,
+            sys.r * (0.2 + rng.next() * 0.1), 1.0, 0.42, 0.5)
+        }
+        // 혜성 매듭 — 방사상 바깥으로 흩어진 작은 먼지 방울들 (헬릭스 [확인])
+        for (let i = 0; i < 10; i++) {
+          const a = rng.next() * Math.PI * 2
+          const rr = sys.r * (0.55 + rng.next() * 0.4)
+          gasBody(`knot:${i}`, sys.x + Math.cos(a) * rr, sys.y + Math.sin(a) * rr,
+            sys.z + (rng.next() - 0.5) * sys.r * 0.3,
+            sys.r * 0.06 + rng.next() * sys.r * 0.04, 0.7, 0.5, 0.42)
+        }
+      } else if (snrCrab) {
+        // 게 — 주황 필라멘트 새장(껍질) + 청백 싱크로트론 코어 (조사 [확인]).
+        // 펄서(발전기)는 아래 기존 블록이 심는다.
+        for (let i = 0; i < 12; i++) {
+          const a = (i / 12) * Math.PI * 2 + rng.next() * 0.3
+          const rr = sys.r * (0.75 + rng.next() * 0.3)
+          gasBody(`fil:${i}`, sys.x + Math.cos(a) * rr, sys.y + Math.sin(a) * rr,
+            sys.z + (rng.next() - 0.5) * sys.r * 0.5,
+            sys.r * (0.14 + rng.next() * 0.1), 1.2, 0.6, 0.3)
+        }
+        gasBody('syn', sys.x, sys.y, sys.z, sys.r * 0.45, 0.55, 0.72, 1.1)
+      } else if (snrVeil) {
+        // 베일 — 중심 엔진 없는 유령 밧줄: 청록·적 교차 호 3가닥 (조사 [확인])
+        for (let arc = 0; arc < 3; arc++) {
+          const a0 = arc * 2.1 + rng.next() * 0.5
+          for (let i = 0; i < 6; i++) {
+            const a = a0 + i * 0.22
+            const rr = sys.r * (0.8 + rng.next() * 0.25)
+            gasBody(`arc:${arc}:${i}`, sys.x + Math.cos(a) * rr, sys.y + Math.sin(a) * rr,
+              sys.z + (rng.next() - 0.5) * sys.r * 0.4, sys.r * (0.08 + rng.next() * 0.06),
+              i % 2 === 0 ? 0.35 : 1.0, i % 2 === 0 ? 0.88 : 0.4, i % 2 === 0 ? 0.8 : 0.45)
+          }
+        }
+      } else {
+        // HII 블리스터 (조사 [확인]) — ① 엔진: 압도적 1 + 조연 5 청백 O별
+        const eng = this.newBody(hashSeed(`map:${sys.name}:o1`), BodyKind.Sun,
+          sys.x, sys.y, 46 + rng.next() * 26, 0.75, 0.85, 1.4)
+        eng.z = sys.z
+        list.push(eng)
+        for (let i = 0; i < 5; i++) {
+          const a = rng.next() * Math.PI * 2
+          const s = this.newBody(hashSeed(`map:${sys.name}:ob:${i}`), BodyKind.Sun,
+            sys.x + Math.cos(a) * sys.r * 0.12, sys.y + Math.sin(a) * sys.r * 0.12,
+            18 + rng.next() * 16, 0.8, 0.87, 1.35)
+          s.z = sys.z + (rng.next() - 0.5) * sys.r * 0.08
+          list.push(s)
+        }
+        // 카리나 — 에타 카리나 (실명): 100~150 Msun LBV 시한폭탄 (조사 [확인])
+        if (sys.name === '카리나 성운') {
+          const etaId = hashSeed('map:카리나 성운:에타 카리나')
+          const eta = this.newBody(etaId, BodyKind.Sun,
+            sys.x + sys.r * 0.2, sys.y - sys.r * 0.14, 130, 1.9, 0.8, 0.45)
+          eta.z = sys.z
+          registerName(etaId, '에타 카리나', '')
+          list.push(eta)
+        }
+        // ② 벽 — 껍질 위 덩어리들, 개구부(샴페인 유출구) 한 섹터는 비운다.
+        // 엔진 곁 안쪽 3개는 청록(OIII), 나머지는 붉은-핑크(Hα)
+        const openA = rng.next() * Math.PI * 2
+        let wallI = 0
+        while (wallI < 14) {
+          const a = rng.next() * Math.PI * 2
+          let dA = a - openA
+          while (dA > Math.PI) dA -= 2 * Math.PI
+          while (dA < -Math.PI) dA += 2 * Math.PI
+          if (Math.abs(dA) < 0.55) continue // 개구부 — 거품이 터진 곳
+          const rr = sys.r * (0.85 + rng.next() * 0.3)
+          gasBody(`wall:${wallI}`, sys.x + Math.cos(a) * rr, sys.y + Math.sin(a) * rr,
+            sys.z + (rng.next() - 0.5) * sys.r * 0.55, sys.r * (0.22 + rng.next() * 0.16),
+            1.0, 0.44 + rng.next() * 0.12, 0.52)
+          wallI++
+        }
+        for (let i = 0; i < 3; i++) {
+          const a = rng.next() * Math.PI * 2
+          gasBody(`oiii:${i}`, sys.x + Math.cos(a) * sys.r * 0.3,
+            sys.y + Math.sin(a) * sys.r * 0.3, sys.z + (rng.next() - 0.5) * sys.r * 0.15,
+            sys.r * (0.14 + rng.next() * 0.08), 0.35, 0.9, 0.8)
+        }
+        // ③ 기둥 — 벽에서 엔진을 향해 뻗은 어두운 사슬 (그림자 논리 [확인])
+        for (let p = 0; p < 3; p++) {
+          const a = openA + Math.PI + (p - 1) * 0.9 + rng.next() * 0.3
+          for (let seg = 0; seg < 3; seg++) {
+            const rr = sys.r * (0.78 - seg * 0.17)
+            gasBody(`pillar:${p}:${seg}`, sys.x + Math.cos(a) * rr,
+              sys.y + Math.sin(a) * rr, sys.z + (rng.next() - 0.5) * sys.r * 0.1,
+              sys.r * (0.1 - seg * 0.02), 0.55, 0.36, 0.3)
+          }
+        }
+        // ④ 어린 별들 — 중간 반경 산포 (원시별·YSO)
+        for (let i = 0; i < 12; i++) {
+          const a = rng.next() * Math.PI * 2
+          const rr = sys.r * (0.25 + rng.next() * 0.7)
+          const s = this.newBody(hashSeed(`map:${sys.name}:yso:${i}`), BodyKind.Sun,
+            sys.x + Math.cos(a) * rr, sys.y + Math.sin(a) * rr,
+            13 + rng.next() * 22, 0.85, 0.8, 1.3)
+          s.z = sys.z + (rng.next() - 0.5) * sys.r * 0.4
+          list.push(s)
+        }
       }
       // 게 성운의 심장 — 펄서. 1초에 30번 도는 등대 (렌더러가 빔을 돌린다)
       if (sys.name === '게 성운') {
@@ -793,61 +903,227 @@ export class Voyage {
         list.push(p)
       }
     }
-    // 성단은 별 **무리**다 — 산개(플레이아데스)는 느슨한 십수 개, 구상(오메가
-    // 센타우리)은 핵 주위로 수십 개가 공 모양으로 빽빽하다 (실물리 축소판)
+    // 성단 — King 프로파일 (조사 [확인] rc:rh:rt ≈ 1:3:40, 계단 CDF) +
+    // 질량 분리(무거운 별이 안쪽) + 종족 팔레트(거성 크게·블루 스트래글러 핵).
+    // 구상성단은 회전한다(오메가 센 [확인]). 가스·성운기 없음 — 별만.
     if (kind === BodyKind.Garden && sys.r === 0) {
       const glob = sys.ly > 1000
-      const clusterN = glob ? 44 : 14
-      for (let i = 0; i < clusterN; i++) {
+      const N = glob ? 48 : 16
+      const rc = glob ? 130 : 300
+      const bands: readonly (readonly [number, number, number])[] = glob
+        ? [[0.2, 0.15, 1], [0.3, 1, 3], [0.3, 3, 10], [0.18, 10, 30], [0.02, 30, 40]]
+        : [[0.35, 0.3, 1], [0.4, 1, 3], [0.25, 3, 6]]
+      const radii: number[] = []
+      for (let i = 0; i < N; i++) {
+        const u = rng.next()
+        let acc = 0
+        let lo = 0.5
+        let hi = 1
+        for (const b of bands) {
+          acc += b[0]
+          if (u <= acc) {
+            lo = b[1]
+            hi = b[2]
+            break
+          }
+        }
+        radii.push(rc * (lo + rng.next() * (hi - lo)))
+      }
+      radii.sort((a, b) => a - b)
+      for (let i = 0; i < N; i++) {
+        const orbR = radii[i]!
+        const rank = 1 - i / N
+        let sr = (glob ? 50 : 60) + rank * (glob ? 130 : 120) * (0.8 + rng.next() * 0.4)
+        const u2 = rng.next()
+        let c1 = 1.0
+        let c2 = 0.9
+        let c3 = 0.72
+        if (glob) {
+          if (u2 < 0.2) {
+            c1 = 1.3
+            c2 = 0.72
+            c3 = 0.42
+            sr *= 1.5 // 적색거성 — 빛의 70~80%는 이들 것
+          } else if (u2 < 0.35) {
+            c1 = 0.78
+            c2 = 0.85
+            c3 = 1.25 // 청백 수평가지
+          } else if (i < N * 0.2 && u2 < 0.45) {
+            c1 = 0.85
+            c2 = 0.9
+            c3 = 1.35
+            sr *= 1.15 // 블루 스트래글러 — 충돌 재생별, 핵에만
+          }
+        } else if (i >= N - 7) {
+          c1 = 0.72
+          c2 = 0.82
+          c3 = 1.4
+          sr *= 1.3 // 산개의 밝은 B형 청색 한 줌 (플레이아데스 일곱 자매)
+        } else {
+          c1 = 1.1
+          c2 = 0.75
+          c3 = 0.5
+          sr *= 0.7 // 흐린 주황 다수
+        }
         const sId = hashSeed(`map:${sys.name}:s${i}`)
-        const sr = glob ? 55 + rng.next() * 150 : 70 + rng.next() * 120
-        const s = this.newBody(sId, BodyKind.Sun, sys.x, sys.y, sr,
-          0.8 + rng.next() * 0.4, 0.9 + rng.next() * 0.25, 1.1 + rng.next() * 0.4)
+        const s = this.newBody(sId, BodyKind.Sun, sys.x, sys.y, sr, c1, c2, c3)
         s.ax = sys.x
         s.ay = sys.y
         s.az = sys.z
-        s.orbR = glob ? 700 + rng.next() * 3800 : 500 + rng.next() * 1200
+        s.orbR = orbR
         s.orbA = rng.next() * Math.PI * 2
-        s.orbW = (0.03 + rng.next() * 0.03) / Math.sqrt(1 + s.orbR / 900)
-        s.inc = (rng.next() - 0.5) * (glob ? 1.4 : 0.5)
+        s.orbW = (glob ? 0.05 : 0.04) / Math.sqrt(1 + (orbR / rc) * 0.5)
+        s.inc = (rng.next() - 0.5) * (glob ? 1.6 : 0.5)
         s.x = sys.x + Math.cos(s.orbA) * s.orbR
         s.y = sys.y + Math.sin(s.orbA) * s.orbR * Math.cos(s.inc)
         s.z = sys.z + Math.sin(s.orbA) * s.orbR * Math.sin(s.inc)
         list.push(s)
       }
+      // 플레이아데스 — 파란 반사 베일: 태생 구름이 아니라 통과 중인 먼지 [확인]
+      if (sys.name === '플레이아데스 성단') {
+        for (let i = 0; i < 4; i++) {
+          const a = rng.next() * Math.PI * 2
+          const gb = this.newBody(hashSeed(`map:${sys.name}:veil:${i}`), BodyKind.Garden,
+            sys.x + Math.cos(a) * rc * (0.6 + rng.next() * 2),
+            sys.y + Math.sin(a) * rc * (0.6 + rng.next() * 2),
+            160 + rng.next() * 140, 0.5, 0.68, 1.05)
+          gb.z = sys.z + (rng.next() - 0.5) * rc
+          gb.origin = sys.name
+          list.push(gb)
+        }
+      }
+      // 히아데스 — 죽은 심 백색왜성 (실제 8개 확인 [확인], 게임엔 셋)
+      if (sys.name === '히아데스 성단') {
+        for (let i = 0; i < 3; i++) {
+          const a = rng.next() * Math.PI * 2
+          const s = this.newBody(hashSeed(`map:${sys.name}:wd:${i}`), BodyKind.Sun,
+            sys.x + Math.cos(a) * rc * 0.8, sys.y + Math.sin(a) * rc * 0.8,
+            9, 0.86, 0.92, 1.3)
+          s.z = sys.z
+          list.push(s)
+        }
+      }
     }
-    // 은하는 나라다 — 중심 블랙홀(앵커) 둘레로 별 원반과 가스가 돈다
-    // ("은하도 얼마나 큰데, 가운데 블랙홀이 있을 거 아냐": 실플레이)
+    // 은하 — 조사 12기 종합: 팽대부(늙은 주황·등방) + 얇은 원반(한 방향·거의
+    // 평면·혼합) + 헤일로(성긴 적갈·등방), 회전곡선 평탄(orbW ∝ 1/r — 케플러
+    // 아님), 젊은 청백은 로그 나선 팔(φ≈12°) 위. 은하마다 실제 개성:
+    // M31 = 10kpc 고리 + 위성 M32·M110 / M33 = 중심 BH 없음 + NGC 604 /
+    // LMC = 어긋난 막대 + 팔 1개 + 타란툴라 / SMC = 붕괴 덩어리 (전부 [확인])
     if (isGal) {
-      const starN2 = 64
+      const R2 = sys.r
+      const isM31 = sys.name === '안드로메다 은하'
+      const isM33 = sys.name === '삼각형자리 은하'
+      const isLMC = sys.name === '큰 마젤란 은하'
+      const isSMC = sys.name === '작은 마젤란 은하'
+      const arms = isLMC ? 1 : 2
+      const armAt = (orbR: number, k: number): number =>
+        Math.log(Math.max(0.15, orbR / (R2 * 0.12))) / 0.2126 +
+        (Math.PI * 2 / arms) * k
+      const starN2 = 76
       for (let i = 0; i < starN2; i++) {
         const sId2 = hashSeed(`map:${sys.name}:gs:${i}`)
-        const rr2 = 90 + rng.next() * 320
-        const s2 = this.newBody(sId2, BodyKind.Sun, sys.x, sys.y, rr2,
-          0.9 + rng.next() * 0.6, 0.85 + rng.next() * 0.4, 0.8 + rng.next() * 0.6)
+        const u = rng.next()
+        const bulgeF = isM33 || isSMC ? 0.06 : 0.25
+        let orbR: number
+        let inc: number
+        let sr: number
+        let c1: number
+        let c2: number
+        let c3: number
+        if (u < bulgeF) {
+          orbR = R2 * (0.06 + rng.next() * 0.12)
+          inc = (rng.next() - 0.5) * 2.6
+          sr = 100 + rng.next() * 220
+          c1 = 1.15
+          c2 = 0.78
+          c3 = 0.5
+        } else if (u < 0.82) {
+          orbR = R2 * (0.2 + rng.next() * 0.85)
+          inc = (rng.next() - 0.5) * (isSMC ? 1.0 : 0.14)
+          sr = 80 + rng.next() * 170
+          if (rng.next() < 0.45) {
+            c1 = 0.72
+            c2 = 0.8
+            c3 = 1.3
+          } else {
+            c1 = 1.05
+            c2 = 0.92
+            c3 = 0.72
+          }
+        } else {
+          orbR = R2 * (0.95 + rng.next() * 1.5)
+          inc = (rng.next() - 0.5) * 2.8
+          sr = 60 + rng.next() * 110
+          c1 = 0.95
+          c2 = 0.6
+          c3 = 0.42
+        }
+        const s2 = this.newBody(sId2, BodyKind.Sun, sys.x, sys.y, sr, c1, c2, c3)
         s2.ax = sys.x
         s2.ay = sys.y
         s2.az = sys.z
-        s2.orbR = star.r * (1.4 + rng.next() * 2.2)
-        s2.orbA = rng.next() * Math.PI * 2
-        s2.orbW = (0.02 + rng.next() * 0.03) / Math.sqrt(0.5 + s2.orbR / star.r)
-        s2.inc = (rng.next() - 0.5) * 0.24
+        const young = c3 > 1.1 && Math.abs(inc) < 0.2
+        if (young && isM31) orbR = R2 * (0.6 + rng.next() * 0.12) // 10kpc 불의 고리
+        s2.orbR = orbR
+        s2.orbA = young && !isM31
+          ? armAt(orbR, i % arms) + (rng.next() - 0.5) * 0.3
+          : rng.next() * Math.PI * 2
+        s2.orbW = 0.045 * Math.min(1, (R2 * 0.15) / orbR)
+        s2.inc = inc
         s2.x = sys.x + Math.cos(s2.orbA) * s2.orbR
-        s2.y = sys.y + Math.sin(s2.orbA) * s2.orbR * Math.cos(s2.inc)
-        s2.z = sys.z + Math.sin(s2.orbA) * s2.orbR * Math.sin(s2.inc)
+        s2.y = sys.y + Math.sin(s2.orbA) * s2.orbR * Math.cos(inc)
+        s2.z = sys.z + Math.sin(s2.orbA) * s2.orbR * Math.sin(inc)
         list.push(s2)
       }
-      const gasN2 = 8
-      for (let i = 0; i < gasN2; i++) {
+      // 가스 — HII 핑크는 팔(M31 은 고리) 위에만: 별 엔진 없는 곳은 안 빛난다
+      for (let i = 0; i < 8; i++) {
         const gId2 = hashSeed(`map:${sys.name}:ggas:${i}`)
-        const gr3 = sys.r * (0.08 + rng.next() * 0.08)
+        const gR = isM31 ? R2 * (0.58 + rng.next() * 0.16) : R2 * (0.3 + rng.next() * 0.7)
+        const gA = isM31 ? rng.next() * Math.PI * 2 : armAt(gR, i % arms) + (rng.next() - 0.5) * 0.25
         const gb2 = this.newBody(gId2, BodyKind.Garden,
-          sys.x + (rng.next() - 0.5) * star.r * 4.5,
-          sys.y + (rng.next() - 0.5) * star.r * 4.5, gr3,
-          sys.cr, sys.cg, Math.min(1.3, sys.cb * 1.1))
-        gb2.z = sys.z + (rng.next() - 0.5) * star.r * 0.6
+          sys.x + Math.cos(gA) * gR, sys.y + Math.sin(gA) * gR,
+          sys.r * (0.07 + rng.next() * 0.07), 1.0, 0.45, 0.6)
+        gb2.z = sys.z + (rng.next() - 0.5) * R2 * 0.06
         gb2.origin = sys.name
         list.push(gb2)
+      }
+      // LMC — 중심에서 어긋난 막대 + 남동 모서리의 타란툴라 (조사 [확인])
+      if (isLMC) {
+        for (let i = 0; i < 10; i++) {
+          const t2 = i / 9 - 0.5
+          const s3 = this.newBody(hashSeed(`map:${sys.name}:bar:${i}`), BodyKind.Sun,
+            sys.x + R2 * 0.12 + t2 * R2 * 0.55, sys.y - R2 * 0.08 + t2 * R2 * 0.1,
+            110 + rng.next() * 120, 1.05, 0.85, 0.62)
+          s3.z = sys.z + (rng.next() - 0.5) * R2 * 0.04
+          list.push(s3)
+        }
+        const tar = this.newBody(hashSeed('map:큰 마젤란 은하:타란툴라'), BodyKind.Garden,
+          sys.x + R2 * 0.62, sys.y - R2 * 0.62, R2 * 0.2, 1.1, 0.42, 0.55)
+        tar.z = sys.z
+        registerName(hashSeed('map:큰 마젤란 은하:타란툴라'), '타란툴라 성운', '')
+        list.push(tar)
+      }
+      // M33 — 거대 HII NGC 604 (조사 [확인])
+      if (isM33) {
+        const n604 = this.newBody(hashSeed('map:삼각형자리 은하:NGC 604'), BodyKind.Garden,
+          sys.x + R2 * 0.5, sys.y + R2 * 0.34, R2 * 0.16, 1.05, 0.45, 0.6)
+        n604.z = sys.z
+        registerName(hashSeed('map:삼각형자리 은하:NGC 604'), 'NGC 604', '')
+        list.push(n604)
+      }
+      // M31 — 위성 은하 M32·M110 (조사 [확인])
+      if (isM31) {
+        const sat = (nm: string, ang: number, rr: number): void => {
+          const sid = hashSeed(`map:안드로메다 은하:${nm}`)
+          const sb = this.newBody(sid, BodyKind.Sun,
+            sys.x + Math.cos(ang) * R2 * 1.45, sys.y + Math.sin(ang) * R2 * 1.45,
+            rr, 1.05, 0.9, 0.72)
+          sb.z = sys.z + (ang > 2 ? -1 : 1) * R2 * 0.2
+          registerName(sid, nm, '')
+          list.push(sb)
+        }
+        sat('M32', 0.8, 430)
+        sat('M110', 3.6, 380)
       }
     }
   }

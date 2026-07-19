@@ -1117,22 +1117,42 @@ void main(){
           sp.scale.setScalar(sc * (isCore ? 2.3 : 2.7))
           nebN++
         }
-        // 둘째 층 — 회전 다른 겹을 얹어 결이 산다 (한 장은 벽지처럼 읽힌다)
-        if (!isCore && nebN < MAX_NEB) {
-          const sp2 = this.nebSprites[nebN]!
-          sp2.visible = true
-          const ti2 = 50 + ((b.id >>> 3) % this.nebTex.length)
-          if (this.nebMapId[nebN] !== ti2) {
-            sp2.material.map = this.nebTex[(b.id >>> 3) % this.nebTex.length]!
-            sp2.material.needsUpdate = true
-            this.nebMapId[nebN] = ti2
+        // 겹layers — 한 장은 벽지처럼 읽힌다 ("하나의 오브젝트가 아니라고":
+        // 실플레이). 큰 가스체는 몸 반경 안에 결 다른 조각 여러 장을 3D 로
+        // 흩뿌린다 — 원거리에서도 덩어리들의 구름으로 읽힌다. 결정론 산포.
+        if (!isCore) {
+          const chunks = Math.min(7, 1 + Math.floor(b.r / 420))
+          for (let k = 1; k <= chunks && nebN < MAX_NEB; k++) {
+            const h1 = ((b.id ^ (k * 0x9e3779b1)) >>> 8) % 1000
+            const h2 = ((b.id ^ (k * 0x85ebca6b)) >>> 6) % 1000
+            const h3 = ((b.id ^ (k * 0xc2b2ae35)) >>> 4) % 1000
+            const sp2 = this.nebSprites[nebN]!
+            sp2.visible = true
+            const tIdx = (b.id + k * 7) % this.nebTex.length
+            const ti2 = 50 + tIdx
+            if (this.nebMapId[nebN] !== ti2) {
+              sp2.material.map = this.nebTex[tIdx]!
+              sp2.material.needsUpdate = true
+              this.nebMapId[nebN] = ti2
+            }
+            sp2.material.rotation = h3 * 0.0063 + t * (k % 2 === 0 ? 0.01 : -0.008)
+            const warm = h1 / 1000
+            sp2.material.color.setRGB(
+              Math.min(1, b.cr * (0.7 + warm * 0.45)),
+              Math.min(1, b.cg * (0.65 + warm * 0.35)),
+              Math.min(1, b.cb * (0.8 + (1 - warm) * 0.35)),
+            )
+            sp2.material.opacity = 0.3 + (h2 % 400) / 1000
+            const ang2 = h1 * 0.00628
+            const off = 0.2 + (h2 / 1000) * 0.65
+            sp2.position.set(
+              ax + Math.cos(ang2) * b.r * off,
+              ay + (h3 / 1000 - 0.5) * b.r * 0.5,
+              az + Math.sin(ang2) * b.r * off,
+            )
+            sp2.scale.setScalar(sc * (0.7 + (h3 % 500) / 700))
+            nebN++
           }
-          sp2.material.rotation = (b.id % 314) * 0.02 + 1.2
-          sp2.material.color.setRGB(0.8, 0.85, 0.95)
-          sp2.material.opacity = 0.55
-          sp2.position.set(ax, ay, az)
-          sp2.scale.setScalar(sc * 1.9)
-          nebN++
         }
         if (glowN < MAX_GLOW) {
           const sp = this.glows[glowN++]!
