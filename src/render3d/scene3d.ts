@@ -916,7 +916,7 @@ void main(){
         const theta = b.r >= R * 1.25
           ? b.kind === BodyKind.Sun ? 0.045
             : b.kind === BodyKind.Garden || b.kind === BodyKind.Core ? 0.06 : 0.022
-          : 0.0035
+          : b.kind === BodyKind.Dust ? 0.0018 : 0.0035 // 소행성은 티끌 반짝임까지만
         sc = Math.max(sc, dCam * theta)
       }
       this.v3.set(ax, ay, az)
@@ -932,6 +932,16 @@ void main(){
           Math.max(0.6, sc) * (1 - st * 0.38),
         )
         this.m4.compose(this.v3, this.qS, this.s3)
+      } else if (b.kind === BodyKind.Dust && !b.hot) {
+        // 소행성은 감자다 — 매끈한 공으로 그리면 행성과 헷갈린다 (실플레이).
+        // id 해시로 찌그러뜨려 돌덩이로 읽히게.
+        const base2 = Math.max(0.5, sc)
+        this.s3.set(
+          base2 * (0.55 + ((b.id >>> 2) % 40) * 0.01),
+          base2 * (0.68 + ((b.id >>> 7) % 30) * 0.01),
+          base2,
+        )
+        this.m4.compose(this.v3, this.q0, this.s3)
       } else {
         this.s3.setScalar(Math.max(0.6, sc))
         this.m4.compose(this.v3, this.q0, this.s3)
