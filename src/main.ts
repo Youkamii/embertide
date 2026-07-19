@@ -120,7 +120,8 @@ function boot(): void {
   expBtn.style.cssText =
     'position:absolute;right:16px;top:14px;font:700 14px/1.6 ui-monospace,monospace;' +
     'color:#ffd9a8;background:rgba(24,14,6,.85);border:1px solid #d9a84c;padding:8px 16px;' +
-    'cursor:pointer;letter-spacing:.12em;display:none;'
+    // #ui 는 pointer-events:none — 명시로 켜야 클릭이 닿는다 ("눌러도 안 움직여")
+    'cursor:pointer;letter-spacing:.12em;display:none;pointer-events:auto;'
   expBtn.addEventListener('click', () => {
     game.startExperiment()
   })
