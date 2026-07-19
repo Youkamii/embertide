@@ -239,6 +239,47 @@ function galaxyTexture(seed: number): THREE.Texture {
 }
 
 /**
+ * 항성 표면 — 쌀알 조직(대류 세포) + 흑점. "빛번짐 스프라이트"가 아니라
+ * 표면이 끓는 **물체**로 보이게 ("희무끄레" 의 근본 수리 — 형태 우선).
+ */
+function starTexture(seed: number): THREE.Texture {
+  const c = document.createElement('canvas')
+  c.width = 128
+  c.height = 64
+  const ctx = c.getContext('2d')!
+  let s = seed
+  const rnd = (): number => {
+    s = (s * 16807) % 2147483647
+    return s / 2147483647
+  }
+  ctx.fillStyle = '#e8e0d0'
+  ctx.fillRect(0, 0, 128, 64)
+  // 쌀알 조직 — 밝고 어두운 잔 세포
+  for (let i = 0; i < 420; i++) {
+    const bright = rnd() < 0.5
+    ctx.fillStyle = bright ? `rgba(255,255,255,${0.1 + rnd() * 0.14})` : `rgba(120,90,60,${0.08 + rnd() * 0.12})`
+    ctx.beginPath()
+    ctx.ellipse(rnd() * 128, rnd() * 64, 1 + rnd() * 2.6, 1 + rnd() * 2, rnd() * 3, 0, 6.28)
+    ctx.fill()
+  }
+  // 흑점 무리
+  for (let i = 0; i < 5; i++) {
+    const x = rnd() * 128
+    const y = 10 + rnd() * 44
+    const r = 2 + rnd() * 5
+    const g = ctx.createRadialGradient(x, y, 0.5, x, y, r)
+    g.addColorStop(0, 'rgba(30,15,8,0.85)')
+    g.addColorStop(0.6, 'rgba(90,50,25,0.4)')
+    g.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(x - r, y - r, r * 2, r * 2)
+  }
+  const t = new THREE.CanvasTexture(c)
+  t.wrapS = THREE.RepeatWrapping
+  return t
+}
+
+/**
  * 행성 표면 — 절차 생성 (외부 에셋은 단일 파일 원칙상 불가, 대신 굽는다).
  * 회색조로 만들어 몸색 틴트가 곱해지게 — 8장으로 수백 행성이 다 달라 보인다.
  */
@@ -357,6 +398,9 @@ export class Scene3D {
   private readonly nebTex: THREE.Texture[] = []
   private readonly galTex: THREE.Texture[] = []
   private readonly nebMapId: number[] = []
+  private readonly starTex: THREE.Texture[] = []
+  private readonly starMeshes: THREE.Mesh[] = []
+  private readonly starTexId: number[] = []
 
   private readonly ecliptic: THREE.PolarGridHelper
   /** 랜드마크 — 실지도 항성계는 아무리 멀어도 밝은 별점으로 보인다 (항법의 잣대) */
@@ -464,6 +508,16 @@ export class Scene3D {
     }
     for (let i = 0; i < 4; i++) this.nebTex.push(nebulaTexture(313 + i * 97))
     for (let i = 0; i < 3; i++) this.galTex.push(galaxyTexture(511 + i * 131))
+    // 근접 항성 글로브 — 표면이 끓는 물체 (솜뭉치 후광 금지)
+    for (let i = 0; i < 4; i++) this.starTex.push(starTexture(701 + i * 61))
+    for (let i = 0; i < 8; i++) {
+      const mat = new THREE.MeshBasicMaterial()
+      const sm = new THREE.Mesh(sphere, mat)
+      sm.visible = false
+      this.starMeshes.push(sm)
+      this.starTexId.push(-1)
+      this.scene.add(sm)
+    }
     for (let i = 0; i < MAX_NEB; i++) {
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({
         map: smokeTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
@@ -855,6 +909,7 @@ void main(){
     let ringN = 0
     let nebN = 0
     let planetN = 0
+    let starN = 0
     let pulsarSeen = false
     let pulsarX = 0
     let pulsarY = 0
@@ -1045,6 +1100,36 @@ void main(){
         }
         continue
       }
+      // 근접 항성 글로브 — 화면에서 큰 별은 표면(쌀알 조직·흑점)이 있는 물체로.
+      // 빛번짐 스프라이트 의존이 "희무끄레"의 근본이었다 (실플레이 확정).
+      if (b.kind === BodyKind.Sun && !b.hot && redK === 0 && starN < this.starMeshes.length &&
+        dCam > 0 && sc > dCam * 0.016) {
+        const sm = this.starMeshes[starN]!
+        sm.visible = true
+        sm.position.set(ax, ay, az)
+        sm.scale.setScalar(Math.max(0.6, sc))
+        sm.rotation.y = t * 0.02 + (b.id % 628) * 0.01
+        const smat = sm.material as THREE.MeshBasicMaterial
+        const sti = b.id % this.starTex.length
+        if (this.starTexId[starN] !== sti) {
+          smat.map = this.starTex[sti]!
+          smat.needsUpdate = true
+          this.starTexId[starN] = sti
+        }
+        const pu = 1 + 0.03 * Math.sin(t * 1.1 + (b.id % 628) * 0.01)
+        smat.color.setRGB(Math.min(1.6, b.cr * pu), Math.min(1.5, b.cg * pu), Math.min(1.4, b.cb))
+        starN++
+        // 코로나는 절제 — 형태가 주인공, 번짐은 조연
+        if (glowN < MAX_GLOW) {
+          const sp = this.glows[glowN++]!
+          sp.visible = true
+          sp.position.set(ax, ay, az)
+          sp.scale.setScalar(sc * 1.9)
+          sp.material.color.setRGB(b.cr * 0.5, b.cg * 0.4, b.cb * 0.25)
+          sp.material.opacity = 0.3
+        }
+        continue
+      }
       const isEmis = b.kind === BodyKind.Sun || b.hot
       if (isEmis && emisN < 600) {
         this.emis.setMatrixAt(emisN, this.m4)
@@ -1064,18 +1149,19 @@ void main(){
         this.emis.setColorAt(emisN, this.col)
         emisN++
         if (b.kind === BodyKind.Sun && glowN < MAX_GLOW - 1) {
+          // 원거리 별 후광 — 절제 (솜뭉치 금지: "희무끄레"의 주범이었다)
           const sp = this.glows[glowN++]!
           sp.visible = true
           sp.position.set(ax, ay, az)
-          sp.scale.setScalar(sc * 5.5 * pulse)
-          sp.material.color.setRGB(b.cr * 0.6 * mottle, b.cg * 0.5, b.cb * 0.3)
-          sp.material.opacity = 0.5
+          sp.scale.setScalar(sc * 2.8 * pulse)
+          sp.material.color.setRGB(b.cr * 0.45 * mottle, b.cg * 0.38, b.cb * 0.24)
+          sp.material.opacity = 0.26
           const core = this.glows[glowN++]!
           core.visible = true
           core.position.set(ax, ay, az)
-          core.scale.setScalar(sc * 2.3 * pulse)
+          core.scale.setScalar(sc * 1.5 * pulse)
           core.material.color.setRGB(1.4, 1.3, 1.1)
-          core.material.opacity = 0.6
+          core.material.opacity = 0.4
         }
       } else {
         // 근접 행성 글로브 — 어디의 행성이든(태양계·센타우리·필드계) 눈에 띄는
@@ -1177,6 +1263,7 @@ void main(){
     for (let i = ringN; i < this.rings.length; i++) this.rings[i]!.visible = false
     for (let i = nebN; i < MAX_NEB; i++) this.nebSprites[i]!.visible = false
     for (let i = planetN; i < this.planetMeshes.length; i++) this.planetMeshes[i]!.visible = false
+    for (let i = starN; i < this.starMeshes.length; i++) this.starMeshes[i]!.visible = false
 
     // 게 펄서 — 등대 빔 두 줄기가 자기축을 따라 쓸고 돈다 (게 성운의 심장)
     if (pulsarSeen) {

@@ -161,7 +161,15 @@ function boot(): void {
   const autoSteer = (): void => {
     const w = wrapped as unknown as { move: { x: number; y: number }; lift: number }
     const vh = game.camera.viewHeight
-    if (navPick && Math.hypot(navPick.x - game.x, navPick.y - game.y) < vh * 3) navPick = null
+    if (navPick && Math.hypot(navPick.x - game.x, navPick.y - game.y) < vh * 3) {
+      // 클릭 목적지 도착 — 항법을 끄고 그 자리에 선다 ("베가 찍고 바로 딴 데로": 실플레이)
+      navPick = null
+      autoNav = false
+      w.move.x = 0
+      w.move.y = 0
+      w.lift = 0
+      return
+    }
     // 클릭 목적지 > 근처 실속 먹이 > 항로 ("자동항법 느림" 수리 유지)
     const useRoute = !navPick && game.routeName !== null && game.preyDist > vh * 2.2
     const tx = navPick ? navPick.x : useRoute ? game.routeX : game.preyX
