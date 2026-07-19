@@ -7,7 +7,7 @@
 import * as THREE from 'three'
 import { Input } from './engine/input'
 import { LY } from './game/starmap'
-import { STORE_KEY, Voyage, rankOf, type Store } from './game/voyage'
+import { STORE_KEY, Voyage, type Store } from './game/voyage'
 import { Scene3D } from './render3d/scene3d'
 
 function fatal(msg: string): void {
@@ -106,6 +106,7 @@ function boot(): void {
     'text-shadow:0 0 36px rgba(255,180,80,.8);opacity:0;transition:opacity 1s;letter-spacing:.24em;'
   ui.appendChild(rankEl)
   let rankUntil = 0
+  let lastRegion = ''
 
   let started = false
   const center = document.createElement('div')
@@ -133,7 +134,7 @@ function boot(): void {
     line('아무 키나 눌러 눈을 뜬다 — 항해는 언제나 티끌에서 시작한다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
     if (game.journal.length > 0) {
       line(
-        `— ${game.voyages}번째 항해 · 명부 ${game.journal.length} · 최고 ${rankOf(game.bestR)} —`,
+        `— ${game.voyages}번째 항해 · 명부 ${game.journal.length} —`,
         'margin-top:10px;font-size:12px;color:#7d90a8',
       )
     }
@@ -146,11 +147,17 @@ function boot(): void {
   let autoNav = false
   const autoSteer = (): void => {
     const w = wrapped as unknown as { move: { x: number; y: number }; lift: number }
-    const dx = game.preyX - game.x
-    const dy = game.preyY - game.y
+    // 근처(두 화면)에 먹이가 없으면 잡동사니 무시하고 항로 직행 ("자동항법 느림")
+    const vh = game.camera.viewHeight
+    const useRoute = game.routeName !== null && game.preyDist > vh * 2.2
+    const tx = useRoute ? game.routeX : game.preyX
+    const ty = useRoute ? game.routeY : game.preyY
+    const tz = useRoute ? game.routeZ : game.preyZ
+    const dx = tx - game.x
+    const dy = ty - game.y
     const d = Math.hypot(dx, dy) || 1
     const sp = Math.hypot(game.vx, game.vy)
-    if (d < sp * 0.7 && sp > 1) {
+    if (!useRoute && d < sp * 0.7 && sp > 1) {
       // 도착 브레이크 — 지나치기 전에 역추진 (봇 검증 로직)
       w.move.x = -game.vx / sp
       w.move.y = -game.vy / sp
@@ -158,7 +165,7 @@ function boot(): void {
       w.move.x = dx / d
       w.move.y = dy / d
     }
-    const dz = game.preyZ - game.z
+    const dz = tz - game.z
     const zBand = Math.max(300, d * 0.2)
     w.lift = dz > zBand ? 1 : dz < -zBand ? -1 : 0
   }
@@ -226,11 +233,13 @@ function boot(): void {
       foundEl.style.opacity = '0'
       foundUntil = 0
     }
-    if (game.rankUp) {
-      rankEl.textContent = `— ${game.rankUp} —`
+    // 지역 도달 — 이름 하나만 뜬다 (등급 배너 폐지)
+    game.rankUp = null
+    if (game.region && game.region !== lastRegion) {
+      lastRegion = game.region
+      rankEl.textContent = game.region
       rankEl.style.opacity = '1'
-      rankUntil = now + 3600
-      game.rankUp = null
+      rankUntil = now + 3200
     }
     if (rankUntil > 0 && now > rankUntil) {
       rankEl.style.opacity = '0'
@@ -283,7 +292,7 @@ function boot(): void {
         : `달 ×${Math.max(1, Math.round(totalVol / 15.6))}`) +
       (game.digesting > totalVol * 0.05 ? ' (소화 중)' : '')
     coords.textContent =
-      `${rankOf(game.radius)}  ·  질량 ${mass}\n` +
+      `${game.region || '태양계'}  ·  질량 ${mass}\n` +
       `(${Math.round(game.x)}, ${Math.round(game.y)}, z${Math.round(game.z)})  ·  ` +
       `이번 항해 ${game.eatenThisRun} · 명부 ${game.journal.length}` +
       `${game.halo.length > 0 ? ` · 나의 은하 ${game.halo.length}성` : ''}` +

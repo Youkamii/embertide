@@ -292,7 +292,6 @@ export class Voyage {
 
   readonly rivals: Rival[] = []
   rankUp: string | null = null
-  private lastRank = ''
   private gulp = 0
   feed = 0
   private bittenCd = 0
@@ -321,6 +320,12 @@ export class Voyage {
   /** 다음 항로 — 근처에 먹을 게 없으면 나침반이 별 지도의 목적지를 가리킨다 */
   routeName: string | null = null
   routeDist = 0
+  routeX = 0
+  routeY = 0
+  routeZ = 0
+  /** 현재 지역 이름 — 바뀔 때만 화면에 뜬다 (태양계/카이퍼 벨트/오르트 구름/항성계명) */
+  region = ''
+  private regionCd = 0
 
   private readonly gas: Gas[] = []
   private gasIdx = 0
@@ -426,7 +431,6 @@ export class Voyage {
     }
     this.eatCount = 0
     this.voyages += 1
-    this.lastRank = rankOf(this.radius)
     this.refreshSectors(true)
     // 지구 곁에서 눈뜬다 — 타이틀의 약속이자 스케일의 증명: 티끌의 눈높이에서
     // 첫 화면부터 행성이 거대해야 한다 ("왜 시작부터 토성만 해": 실플레이)
@@ -516,45 +520,46 @@ export class Voyage {
   private buildSol(list: Body[]): void {
     const sunId = hashSeed('sol:sun')
     const sun = this.newBody(sunId, BodyKind.Sun, 800, 800, 90, 1.9, 1.5, 0.6)
-    registerName(sunId, '태양', '아침마다 너를 비추던 것이었다.')
+    registerName(sunId, '태양', '')
     list.push(sun)
     this.solSun = sun
-    const P: readonly [string, number, number, BodyKindType, string, number, number, number, number][] = [
-      ['수성', 3.5, 1.7, BodyKind.Rock, '태양에 데인 돌이었다.', 0.6, 0.55, 0.5, 0.12],
-      ['금성', 8.7, 2.2, BodyKind.Rock, '샛별이라 불리던 것이었다.', 0.95, 0.85, 0.6, 0.06],
-      ['지구', 9.2, 2.75, BodyKind.Rock, '네가 태어난 곳이었다.', 0.35, 0.6, 0.95, 0],
-      ['화성', 4.9, 3.4, BodyKind.Rock, '누군가 끝내 가보고 싶어 했다.', 0.9, 0.45, 0.3, 0.03],
-      ['목성', 32, 5.2, BodyKind.Ringed, '행성들의 왕이었다.', 0.85, 0.7, 0.5, 0.02],
-      ['토성', 27, 6.6, BodyKind.Ringed, '고리마저 삼켰다.', 0.9, 0.8, 0.55, 0.04],
-      ['천왕성', 13, 8.1, BodyKind.Rock, '옆으로 누워 돌던 얼음이었다.', 0.6, 0.85, 0.9, 0.01],
-      ['해왕성', 12.5, 9.5, BodyKind.Rock, '가장 푸른 바람이 불던 곳.', 0.4, 0.55, 1.0, 0.03],
+    // 크기 ×1.7·궤도 ×1.35 — "공백은 줄이고 핵심 구조는 키운다". 설명 문구 없음.
+    const P: readonly [string, number, number, BodyKindType, number, number, number, number][] = [
+      ['수성', 6, 2.3, BodyKind.Rock, 0.6, 0.55, 0.5, 0.12],
+      ['금성', 14.8, 3.0, BodyKind.Rock, 0.95, 0.85, 0.6, 0.06],
+      ['지구', 15.6, 3.7, BodyKind.Rock, 0.35, 0.6, 0.95, 0],
+      ['화성', 8.3, 4.6, BodyKind.Rock, 0.9, 0.45, 0.3, 0.03],
+      ['목성', 54, 7.0, BodyKind.Ringed, 0.85, 0.7, 0.5, 0.02],
+      ['토성', 46, 8.9, BodyKind.Ringed, 0.9, 0.8, 0.55, 0.04],
+      ['천왕성', 22, 10.9, BodyKind.Rock, 0.6, 0.85, 0.9, 0.01],
+      ['해왕성', 21, 12.8, BodyKind.Rock, 0.4, 0.55, 1.0, 0.03],
     ]
-    for (const [name, r, orbMul, kind, log, cr, cg, cb, inc] of P) {
+    for (const [name, r, orbMul, kind, cr, cg, cb, inc] of P) {
       const id = hashSeed(`sol:${name}`)
       const p = this.newBody(id, kind, sun.x, sun.y, r, cr, cg, cb)
       this.setOrbit(p, sun, sun.r * orbMul, (id % 628) * 0.01, 1, 0, inc)
-      registerName(id, name, log)
+      registerName(id, name, '')
       list.push(p)
       if (name === '지구') {
         const mId = hashSeed('sol:moon')
-        const m = this.newBody(mId, BodyKind.Dust, p.x, p.y, 2.5, 0.7, 0.7, 0.72)
+        const m = this.newBody(mId, BodyKind.Dust, p.x, p.y, 4.2, 0.7, 0.7, 0.72)
         this.setOrbit(m, p, p.r * 2.3, 0, 1, 0, 0.09)
-        registerName(mId, '달', '지구의 조석을 만들던 돌이었다.')
+        registerName(mId, '달', '')
         list.push(m)
       }
       if (name === '목성') {
         // 갈릴레이 위성 — 라플라스 공명 1:2:4 의 네 형제
-        const GAL: readonly [string, number, number, string][] = [
-          ['이오', 1.7, 1.9, '조석에 반죽되어 화산으로 끓던 위성.'],
-          ['유로파', 1.5, 2.4, '얼음 밑에 바다를 숨기고 있었다.'],
-          ['가니메데', 2.3, 3.0, '태양계에서 가장 큰 위성이었다.'],
-          ['칼리스토', 2.1, 3.7, '흉터로 뒤덮인 오래된 얼굴.'],
+        const GAL: readonly [string, number, number][] = [
+          ['이오', 2.9, 1.9],
+          ['유로파', 2.6, 2.4],
+          ['가니메데', 3.9, 3.0],
+          ['칼리스토', 3.6, 3.7],
         ]
-        for (const [gn, gr, gm, gl] of GAL) {
+        for (const [gn, gr, gm] of GAL) {
           const gid = hashSeed(`sol:${gn}`)
           const gb = this.newBody(gid, BodyKind.Dust, p.x, p.y, gr, 0.72, 0.68, 0.6)
           this.setOrbit(gb, p, p.r * gm, (gid % 628) * 0.01, 1, 0, 0.02)
-          registerName(gid, gn, gl)
+          registerName(gid, gn, '')
           list.push(gb)
         }
         // 트로이 소행성 — 태양-목성 L4/L5, 목성과 영원히 60° 간격 동행
@@ -577,14 +582,14 @@ export class Voyage {
         i === 0 ? 3.4 : 2.4 + ((id >>> 4) % 100) * 0.014, 0.55, 0.5, 0.45)
       this.setOrbit(d, sun, sun.r * (4.1 + ((id >>> 6) % 100) * 0.006),
         (i / 13) * Math.PI * 2, 1, 0, ((id >>> 8) % 100) * 0.0016 - 0.08)
-      if (i === 0) registerName(id, '세레스', '소행성대에서 가장 큰 돌이었다.')
+      if (i === 0) registerName(id, '세레스', '')
       list.push(d)
     }
     // 핼리 혜성 — 실제처럼 길쭉하고 기운 타원. 근일점에서 빨라진다.
     const hId = hashSeed('sol:halley')
     const h = this.newBody(hId, BodyKind.Comet, sun.x, sun.y, 5.5, 0.8, 0.9, 1.0)
     this.setOrbit(h, sun, sun.r * 8, 2.2, 1, 0.72, 0.55)
-    registerName(hId, '핼리 혜성', '76년마다 지구에 들르던 것이었다.')
+    registerName(hId, '핼리 혜성', '')
     list.push(h)
   }
 
@@ -599,22 +604,22 @@ export class Voyage {
     const kind = sys.kind === 'sun' ? BodyKind.Sun : sys.kind === 'garden' ? BodyKind.Garden : BodyKind.Core
     const star = this.newBody(id, kind, sys.x, sys.y, Math.max(60, sys.r), sys.cr, sys.cg, sys.cb)
     star.z = sys.z
-    registerName(id, sys.name, sys.log)
+    registerName(id, sys.name, '')
     list.push(star)
     const rng = new Rng(id)
     for (const c of sys.companions ?? []) {
       const cId = hashSeed(`map:${sys.name}:${c.name}`)
       const comp = this.newBody(cId, BodyKind.Sun, star.x, star.y, c.r, sys.cr * 0.9, sys.cg * 0.9, sys.cb)
       this.setOrbit(comp, star, star.r * c.orbMul, rng.next() * Math.PI * 2, 1, 0, (rng.next() - 0.5) * 0.3)
-      registerName(cId, c.name, c.log ?? `${sys.name}의 동반성이었다.`)
+      registerName(cId, c.name, '')
       list.push(comp)
     }
     for (const p of sys.planets ?? []) {
       const pId = hashSeed(`map:${sys.name}:${p.name}`)
-      const pb = this.newBody(pId, p.ringed ? BodyKind.Ringed : BodyKind.Rock, star.x, star.y, p.r,
+      const pb = this.newBody(pId, p.ringed ? BodyKind.Ringed : BodyKind.Rock, star.x, star.y, p.r * 1.7,
         0.5 + rng.next() * 0.4, 0.5 + rng.next() * 0.3, 0.6 + rng.next() * 0.3)
       this.setOrbit(pb, star, star.r * p.orbMul, rng.next() * Math.PI * 2, 1, 0, (rng.next() - 0.5) * 0.24)
-      registerName(pId, p.name, p.log ?? `${sys.name}의 행성이었다.`)
+      registerName(pId, p.name, '')
       list.push(pb)
     }
     // 알려진 행성이 없는 별도 벌거숭이는 아니다 — 이름 없는 행성 한둘 (통계적 사실)
@@ -622,7 +627,7 @@ export class Voyage {
       const n = 1 + rng.int(2)
       for (let i = 0; i < n; i++) {
         const pId = hashSeed(`map:${sys.name}:p${i}`)
-        const pr = Math.max(3, star.r * (0.05 + rng.next() * 0.06))
+        const pr = Math.max(5, star.r * (0.09 + rng.next() * 0.09))
         const pb = this.newBody(pId, rng.next() < 0.25 ? BodyKind.Ringed : BodyKind.Rock,
           star.x, star.y, pr, 0.55, 0.55, 0.65)
         this.setOrbit(pb, star, star.r * (2.2 + i * 1.3 + rng.next() * 0.6),
@@ -669,7 +674,7 @@ export class Voyage {
         const pid = hashSeed('map:게 성운:펄서')
         const p = this.newBody(pid, BodyKind.Sun, sys.x, sys.y, 16, 1.2, 1.3, 1.6)
         p.z = sys.z
-        registerName(pid, '게 펄서', '초신성이 남긴 심장 — 등대처럼 돌며 우주를 쓸고 있었다.')
+        registerName(pid, '게 펄서', '')
         list.push(p)
       }
     }
@@ -720,7 +725,7 @@ export class Voyage {
         const p = this.newBody(id, BodyKind.Dust, pr.x, pr.y, 1.3, 0.9, 0.85, 0.7)
         p.z = ((id % 100) - 50) * 8
         p.free = true
-        registerName(id, pr.name, pr.log)
+        registerName(id, pr.name, '')
         list.push(p)
       }
     }
@@ -733,9 +738,9 @@ export class Voyage {
       const py = 800 + Math.sin(phase) * k.orb * Math.cos(inc)
       if (Math.floor(px / SECTOR) === sx && Math.floor(py / SECTOR) === sy) {
         const sun = this.ensureSolSun()
-        const b = this.newBody(id, BodyKind.Dust, sun.x, sun.y, k.r, 0.6, 0.62, 0.7)
+        const b = this.newBody(id, BodyKind.Dust, sun.x, sun.y, k.r * 1.8, 0.6, 0.62, 0.7)
         this.setOrbit(b, sun, k.orb, phase, 1, 0, inc)
-        registerName(id, k.name, k.log)
+        registerName(id, k.name, '')
         list.push(b)
       }
     }
@@ -888,7 +893,7 @@ export class Voyage {
     for (const h of HOLES) {
       if (Math.floor(h.x / SECTOR) === sx && Math.floor(h.y / SECTOR) === sy) {
         const id = hashSeed(`hole:${h.name}`)
-        registerName(id, h.name, h.log)
+        registerName(id, h.name, '')
         return { id, x: h.x, y: h.y, z: h.z, vx: 0, vy: 0, vz: 0, vol: volFor(h.r) }
       }
     }
@@ -1279,9 +1284,11 @@ export class Voyage {
         // 배 질량)이면 태양이고 카이퍼고 찰나"(실플레이)가 이 항이다. 첫 태양
         // 공성전(내가 가벼울 때 dom=1)은 그대로 남는다 — 성장의 서사는 불변.
         const dom = Math.max(1, this.vol / (2 * b.r * b.r * b.r))
+        // 대상 크기 항 지수 1.4 — 목성이 ×4.8 무거워지자 태양보다 오래 걸리는
+        // 역전이 생겼다 (계측): 큰 별일수록 가파르게 단단해야 질량 격차가 산다
         const bite = Math.min(
           b.r * b.r * b.r * frac * strength,
-          EDDINGTON * Math.pow(R, 1.6) * (30 / (30 + b.r)) * (1 + this.quasar * 0.5) * dom,
+          EDDINGTON * Math.pow(R, 1.6) * Math.pow(30 / (30 + b.r), 1.4) * (1 + this.quasar * 0.5) * dom,
         ) * step
         b.r = Math.cbrt(Math.max(1, b.r * b.r * b.r - bite))
         this.streamIn += bite * ABSORB_GAIN
@@ -1289,6 +1296,27 @@ export class Voyage {
         // 별의 죽음 — 항성을 임계까지 뜯으면 조용히 안 죽는다 (초신성/행성상성운)
         if (b.kind === BodyKind.Sun && b.r < b.r0 * 0.55 && b.r0 > 40) {
           this.stellarDeath(b)
+          continue
+        }
+        // 행성 붕괴 — 절반을 뜯긴 행성은 조석 불안정으로 무너진다. 이게 없으면
+        // 목성을 100% 갈아야 해서 태양(55% 초신성)보다 오래 걸리는 역전 (계측)
+        if (b.kind !== BodyKind.Sun && b.kind !== BodyKind.Core && b.r < b.r0 * 0.55 && b.r0 > 24) {
+          this.eaten.add(b.id)
+          const bi = this.active.indexOf(b)
+          if (bi >= 0) this.active.splice(bi, 1)
+          this.streamIn += b.r * b.r * b.r * 0.55 * ABSORB_GAIN
+          this.spawnCores(b)
+          this.feed = 1
+          this.gulp = Math.max(this.gulp, 0.7)
+          this.camera.shake(4, 7)
+          const entry: JournalEntry = {
+            name: this.nameBody(b).name, log: '', kind: b.kind,
+            r: Math.round(b.r0), x: Math.round(b.x), y: Math.round(b.y),
+          }
+          this.journal.push(entry)
+          this.lastFound = entry
+          this.persistSoon()
+          this.sfx('kill')
           continue
         }
         if (this.nibbleCd <= 0) {
@@ -1661,6 +1689,9 @@ export class Voyage {
         const s = STAR_MAP[bi]!
         this.routeName = s.name
         this.routeDist = best
+        this.routeX = s.x
+        this.routeY = s.y
+        this.routeZ = s.z
         // 화살 우선순위: 진짜 한 입감 > 항로 — 잔몹은 화살을 받을 자격이 없다
         if (this.preyDist === Infinity) {
           this.preyDist = best
@@ -1708,14 +1739,35 @@ export class Voyage {
       }
     }
 
-    // 등급
-    const rank = rankOf(this.radius)
-    if (rank !== this.lastRank) {
-      this.lastRank = rank
-      this.rankUp = rank
-      this.gulp = 1
-      this.sfx('evolve')
-      this.persist()
+    // 지역 — 도달한 곳의 이름만 띄운다 (등급 배너 폐지: 실플레이)
+    this.regionCd -= step
+    if (this.regionCd <= 0) {
+      this.regionCd = 0.5
+      const dSol = Math.hypot(this.x - 800, this.y - 800)
+      let rg: string
+      if (dSol < SHELL.kuiperIn) rg = '태양계'
+      else if (dSol < SHELL.kuiperOut) rg = '카이퍼 벨트'
+      else if (dSol < SHELL.oortIn) rg = '산란 원반'
+      else if (dSol < SHELL.oortOut) rg = '오르트 구름'
+      else {
+        rg = '성간 공간'
+        let bd = Infinity
+        for (const s of STAR_MAP) {
+          const d = Math.hypot(s.x - this.x, s.y - this.y) - s.r
+          if (d < Math.max(s.r * 5, 15000) && d < bd) {
+            bd = d
+            rg = s.name
+          }
+        }
+        for (const h of HOLES) {
+          const d = Math.hypot(h.x - this.x, h.y - this.y) - h.r
+          if (d < Math.max(h.r * 5, 15000) && d < bd) {
+            bd = d
+            rg = h.name
+          }
+        }
+      }
+      this.region = rg
     }
 
     this.persistCd -= step

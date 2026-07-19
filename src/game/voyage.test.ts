@@ -22,7 +22,7 @@ import { describe, expect, it } from 'vitest'
 import type { Input } from '../engine/input'
 import { SHELL, STAR_MAP } from './starmap'
 import { nameOf } from './starnames'
-import { BodyKind, Voyage, bodyRof, rankOf, volFor, type Body, type Store } from './voyage'
+import { BodyKind, Voyage, bodyRof, volFor, type Body, type Store } from './voyage'
 
 function mockInput(x: number, y: number, lift = 0): Input {
   return { move: { x, y }, lift } as unknown as Input
@@ -126,13 +126,16 @@ describe('검은 입', () => {
     expect(g2.active.some((b) => b.id === prey.id), '우주는 아문다').toBe(true)
   })
 
-  it('⑤ 문턱을 넘으면 칭호가 온다', () => {
+  it('⑤ 지역의 이름 — 도달한 곳이 무엇인지 화면이 말한다 (등급 배너 폐지)', () => {
     const g = new Voyage()
     g.start(null)
-    expect(rankOf(g.radius)).toBe('티끌')
-    g.vol = volFor(13) // R = 13 — '검은 입' 문턱(12) 위
     g.update(mockInput(0, 0), 1 / 60)
-    expect(g.rankUp, '등급 이벤트가 발행됐다').toBe('검은 입')
+    expect(g.region, '요람은 태양계').toBe('태양계')
+    g.x = 800
+    g.y = 800 + (SHELL.kuiperIn + SHELL.kuiperOut) / 2
+    for (let s = 0; s < 40; s++) g.update(mockInput(0, 0), 1 / 60)
+    expect(g.region).toBe('카이퍼 벨트')
+    expect(g.rankUp, '등급 이벤트는 더 이상 없다').toBeNull()
   })
 
   it('⑥ 요람은 굶기지 않는다 — 시작 반경 안에 첫 끼니가 있다', () => {

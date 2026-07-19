@@ -279,7 +279,9 @@ export class Scene3D {
 
     // 우주는 칠흑이지만 게임은 보여야 한다 — 중성 전역광 (청회색을 쓰면
     // 화면 전체가 90년대 도스 게임처럼 푸르뎅뎅해진다: 실플레이)
-    this.scene.add(new THREE.AmbientLight(0xbdb6ab, 0.9))
+    // 1.25 — 항성이 없는 공허에서도 천체가 스스로 어느 정도 비쳐야 한다
+    // ("멀리 내가 원하는 거 찾아갈 때도 보이고": 실플레이)
+    this.scene.add(new THREE.AmbientLight(0xbdb6ab, 1.25))
     this.sun = new THREE.DirectionalLight(0xfff2dd, 1.4)
     this.scene.add(this.sun)
     const fill = new THREE.DirectionalLight(0x8a8278, 0.3)
@@ -291,7 +293,7 @@ export class Scene3D {
 
     const sphere = new THREE.SphereGeometry(1, 20, 14)
     const litMat = new THREE.MeshLambertMaterial()
-    litMat.emissive = new THREE.Color(0x161412) // 완전 검정으로는 안 떨어진다 — 중성 웜톤
+    litMat.emissive = new THREE.Color(0x2a2622) // 자체 발광 — 무광원 공허에서도 보인다
     this.lit = new THREE.InstancedMesh(sphere, litMat, MAX_INST)
     this.lit.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
     this.scene.add(this.lit)
@@ -886,6 +888,10 @@ void main(){
           const dimZ2 = 0.75 + 0.25 * Math.min(1, sc / Math.max(1, b.r))
           mat.color.setRGB(
             Math.min(1, b.cr * 1.15 * dimZ2), Math.min(1, b.cg * 1.15 * dimZ2), Math.min(1, b.cb * 1.2 * dimZ2),
+          )
+          // 자체 발광 틴트 — 항성 없는 곳의 행성도 제 색으로 은은히 빛난다
+          mat.emissive.setRGB(
+            Math.min(0.4, b.cr * 0.22), Math.min(0.38, b.cg * 0.2), Math.min(0.42, b.cb * 0.24),
           )
           planetN++
         } else if (litN < MAX_INST) {
