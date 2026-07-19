@@ -347,6 +347,7 @@ export class Voyage {
   navAssist = false
   /** 질량 과부하 (H 홀드) — 유효 질량 ×1000 (main 이 매 프레임 세팅) */
   surge = false
+  private runT = 0
   private refreshCd = 0
   private nearAny = Infinity
   /** 다음 항로 — 근처에 먹을 게 없으면 나침반이 별 지도의 목적지를 가리킨다 */
@@ -435,6 +436,7 @@ export class Voyage {
     this.jetCd = 0
     this.cometCd = 0
     this.cruise = 1
+    this.runT = 0
     this.nearAny = Infinity
     this.mapNearS = 1e9
     this.routeName = null
@@ -1051,10 +1053,14 @@ export class Voyage {
     this.visualTime += dt
     if (!Number.isFinite(this.vol) || this.vol < 1) this.vol = START_VOL
     const R = this.radius
-    // 질량 과부하 (H 홀드) — 판정용 유효 질량 ×1000: 중력 서열·지배·흡수가
-    // 전부 이 값 기준으로 돈다. 몸(vol)·기록은 불변 — 떼면 원래대로.
-    const volE = this.surge ? this.vol * 1000 : this.vol
-    const surgeK = this.surge ? 26 : 1
+    // 중력 해방 (사용자 사양 2026-07-19): 시작 30초는 현행 중력(요람의 유예),
+    // 30초부터 유효 질량 ×1000 이 기본이 된다 (3초 램프). H 홀드는 그 위에
+    // 다시 ×1000 (합산 백만 배). 몸(vol)·기록은 불변.
+    this.runT += step
+    const ramp = this.runT < 30 ? 0 : Math.min(1, (this.runT - 30) / 3)
+    const baseMul = 1 + 999 * ramp
+    const volE = this.vol * baseMul * (this.surge ? 1000 : 1)
+    const surgeK = (1 + 25 * ramp) * (this.surge ? 26 : 1)
     // 줌 눈금 — 거대해질수록 R×26 → R×18 로 수렴: 무한 줌아웃이면 주변이 전부
     // 동전이 된다 (실플레이). 내 존재감과 이웃의 크기가 같이 자란다.
     // 바닥 40: 티끌의 눈높이. 130에서도 시작 카메라가 몸의 56배 거리라 지구가
@@ -1117,8 +1123,12 @@ export class Voyage {
       this.vz += (this.preyZ - this.z) * Math.min(0.6, this.cruise * 0.09) * step
     }
     // 심공 가속 보강 — 거리 비례 상한(vmax)에 실제로 도달할 추력
+    // 원거리 클릭 항법(50광년 초과) — 표적 거리 비례로 더 세게 연다 (실플레이)
+    const farNav = this.navAssist && this.preyDist > 2500000
+      ? Math.min(3000000, this.preyDist * 0.2)
+      : 0
     const acc = thrustAcc(R) * this.cruise +
-      (this.cruise > 3 ? Math.min(400000, mapNear * 0.06) : 0)
+      (this.cruise > 3 ? Math.min(400000, mapNear * 0.06) + farNav * 0.5 : 0)
     if (this.thrusting) {
       const ml = Math.hypot(mx, my) || 1
       if (mx !== 0 || my !== 0) {
@@ -1366,7 +1376,7 @@ export class Voyage {
     // ×6 고정으론 게 성운(11M px)이 32분이다 ("한번 가는데 30분": 실플레이).
     // 접근하면 mapNear 가 줄며 자동 감속 — 도착 브레이크가 공짜로 따라온다.
     const vmax = base * 1.6 * Math.max(1, this.cruise) +
-      (this.cruise > 1.5 ? Math.min(900000, mapNear * 0.14) : 0)
+      (this.cruise > 1.5 ? Math.max(Math.min(900000, mapNear * 0.14), farNav) : 0)
     // 상한은 수평/수직 분리 — 합산 클램프는 순항이 수평을 다 채우면 상승
     // 성분을 깎아 "스페이스를 눌러도 도로 내려오는" 증상을 만든다 (실플레이)
     const spH = Math.hypot(this.vx, this.vy)
