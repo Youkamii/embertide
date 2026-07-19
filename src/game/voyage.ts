@@ -1267,9 +1267,15 @@ export class Voyage {
             // 점성은 **탈출만** 죽인다 — 접근 속도까지 죽이면 내가 다가갈 때
             // 먹이가 뱃머리 파도처럼 밀려간다 ("가까이 가면 멀어져": 실플레이)
             const vr0 = rvx * ux + rvy * uy + rvz * uz
-            // 과부하 중엔 탈출 감쇠 ×30 — 슬링샷으로 빠져나가는 놈이 없어야
-            // "1000배로 잡는데 도망간다"가 안 된다 (실플레이)
-            const vr = vr0 > 0 ? vr0 : vr0 * Math.exp(-step * 5 * prox * (this.surge ? 30 : 1))
+            // 탈출 감쇠 — 사거리는 넓게(proxV), 세기는 질량 지배 비례(domV).
+            // prox 만 쓰면 태양급(중심거리 큼)은 감쇠가 사실상 0이라 근일점에서
+            // 슬링샷 사출된다 ("궤도에 들어온 태양이 튕겨나가": 실플레이).
+            // 과부하(H)는 추가 ×30.
+            const proxV = (R * 40) / (d + R * 40)
+            const domV = Math.min(6, volE / (b.r * b.r * b.r + 1))
+            const vr = vr0 > 0
+              ? vr0
+              : vr0 * Math.exp(-step * 5 * proxV * (1 + domV) * (this.surge ? 30 : 1))
             // 각운동량 사형선고 — 슈바르츠실트 포획은 거리가 아니라 각운동량
             // 조건이다 (L < 4GM/c 이면 반드시 낙하: 조사 A). 게임 눈금 근사.
             if (!b.doomed && d < R * 24 && vr0 < 0) {
