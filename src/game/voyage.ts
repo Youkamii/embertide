@@ -158,6 +158,12 @@ export interface Body {
   hot: boolean
   /** 파편의 출신 — 원본의 실명. 파편을 먹으면 이 이름이 뜬다 (절차 이름 금지) */
   origin?: string
+  /** 각운동량 사형선고 — L < L_crit 로 탈출이 물리적으로 불가능해진 것 (조사 ②-10) */
+  doomed?: boolean
+  /** 스파게티 예열 0..1 — 찢김 직전의 신장 (조사 ②-15, 렌더가 늘린다) */
+  stretch?: number
+  /** 증발 시한 (초) — 원시 블랙홀 불씨: 제때 못 삼키면 최후 폭발 (조사 ②-20) */
+  decay?: number
 }
 
 export interface JournalEntry {
@@ -289,6 +295,10 @@ export class Voyage {
   readonly halo: HaloStar[] = []
   /** 가스 스트림으로 흘러드는 중인 부피 — 조석 파괴의 수확은 구름으로 온다 */
   private streamIn = 0
+  /** t^(−5/3) 재강착 저장고 — 대어의 잔해가 궤도를 돌다 되돌아온다 (TDE) */
+  private readonly fallbacks: { amt: number; t: number }[] = []
+  /** 스핀 a* 0..0.998 — 순행으로 먹으면 오르고, 소화 효율·제트가 따라온다 */
+  spin = 0.3
 
   lastFound: JournalEntry | null = null
   /** 명부 — 평생 목록. 티끌은 이름 없이 지나간다 */
@@ -383,7 +393,11 @@ export class Voyage {
     this.vx = 0
     this.vy = 0
     this.vz = 0
-    this.vol = START_VOL // 반지름 ~7 — 지구 곁의 티끌
+    // 씨앗 3채널 — 회차마다 다른 기원 (조사 ②-18): 원시 블랙홀(티끌) →
+    // Pop III 항성 잔해(자갈) → 직접 붕괴(무거운 씨앗). 우주의 실제 씨앗 문제.
+    const seedCh = this.voyages % 3
+    this.vol = seedCh === 1 ? 422 : seedCh === 2 ? 5200 : START_VOL
+    this.spin = 0.3
     this.journal.length = 0
     this.eaten.clear()
     this.farthest = 0
@@ -836,6 +850,19 @@ export class Voyage {
         b.z = (rng.next() - 0.5) * 4800
         list.push(b)
       }
+      if (rng.next() < 0.012) {
+        // 꺼져가는 불씨 — 증발 임계의 원시 블랙홀: 제때 못 삼키면 최후 폭발로
+        // 소멸한다 (조사 ②-20, 호킹 증발 dM/dt=−B/M²). 시한부 별미.
+        const id = hashSeed(`${seed}:pbh`)
+        const b = this.newBody(id, BodyKind.Dust,
+          sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
+          2.6, 1.5, 1.25, 0.9)
+        b.z = (rng.next() - 0.5) * rC * 0.5
+        b.free = true
+        b.hot = true
+        b.decay = 45 + rng.next() * 60
+        list.push(b)
+      }
       if (rng.next() < 0.015) {
         const id = hashSeed(`${seed}:ic`)
         const b = this.newBody(id, BodyKind.Comet,
@@ -1041,7 +1068,9 @@ export class Voyage {
     // 순항 z 수렴 — 별들이 구형으로 흩어진 우주에서 수동 xy 비행만으로도
     // 목적지 층에 닿아야 한다: 순항 중엔 나침반 표적의 z 로 미끄러져 간다
     // (실플레이: "성운 도착했는데 아무것도 안 보여" — 목적지가 발밑 수백만 px)
-    if (this.cruise > 2 && this.preyDist < 1e8) {
+    // **수직 입력이 있으면 자동 수렴은 완전히 꺼진다** — 손이 항상 이긴다
+    // (실플레이: "스페이스 누르는데 z 가 내려가" — 수렴력이 입력과 싸웠다)
+    if (this.cruise > 2 && this.preyDist < 1e8 && lift === 0) {
       this.vz += (this.preyZ - this.z) * Math.min(0.6, this.cruise * 0.09) * step
     }
     // 심공 가속 보강 — 거리 비례 상한(vmax)에 실제로 도달할 추력
@@ -1193,6 +1222,12 @@ export class Voyage {
             // 먹이가 뱃머리 파도처럼 밀려간다 ("가까이 가면 멀어져": 실플레이)
             const vr0 = rvx * ux + rvy * uy + rvz * uz
             const vr = vr0 > 0 ? vr0 : vr0 * Math.exp(-step * 5 * prox)
+            // 각운동량 사형선고 — 슈바르츠실트 포획은 거리가 아니라 각운동량
+            // 조건이다 (L < 4GM/c 이면 반드시 낙하: 조사 A). 게임 눈금 근사.
+            if (!b.doomed && d < R * 24 && vr0 < 0) {
+              const Lz = Math.abs(dx * rvy - dy * rvx)
+              if (Lz < R * Math.sqrt(GRAV * MAW_PULL * R) * 0.5) b.doomed = true
+            }
             const kt = Math.exp(-step * 0.7 * prox * prox)
             let tx = (rvx - (rvx * ux + rvy * uy + rvz * uz) * ux) * kt
             let ty = (rvy - (rvx * ux + rvy * uy + rvz * uz) * uy) * kt
@@ -1294,6 +1329,23 @@ export class Voyage {
     if (dist > this.farthest) this.farthest = dist
 
     // ── 가스 스트림 강착 — 찢긴 질량은 구름으로 흘러들어와 서서히 내 것이 된다
+    // 재강착 저장고 방출 — 상승 3초(t²) → t^(−5/3) 멱감쇠 (조사 ②-11)
+    for (let i = this.fallbacks.length - 1; i >= 0; i--) {
+      const fb = this.fallbacks[i]!
+      fb.t += step
+      const shape = fb.t < 3 ? (fb.t / 3) * (fb.t / 3) : Math.pow(fb.t / 3, -5 / 3)
+      const out = Math.min(fb.amt, fb.amt * 0.12 * shape * step * 3)
+      fb.amt -= out
+      this.streamIn += out
+      if (out > this.vol * 0.001) this.feed = Math.max(this.feed, 0.4)
+      if (fb.amt < 1) this.fallbacks.splice(i, 1)
+    }
+    // Bondi 성간 흡입 — 성간 매질은 어디에나 있다: 천천히 날수록 더 먹는다
+    // (Ṁ∝ρM²/v³ 를 게임 눈금으로 누름 — 조사 ②-17, 완행=폭식·급행=굶주림)
+    {
+      const spB = Math.hypot(this.vx, this.vy, this.vz)
+      this.streamIn += (R * R * 0.012) / (1 + Math.pow(spB / 900, 3)) * step
+    }
     if (this.streamIn > 0.5) {
       // 소화(흡수) = 내 부피의 5%/s — 진짜 에딩턴 한계는 질량 비례다(Ṁ∝M).
       // 절대 캡(R^1.6)이면 티끌이 초당 제 몸의 50배를 삼켜 성장이 폭주하고
@@ -1305,9 +1357,10 @@ export class Voyage {
       // "게이미피케이션한 부분은 있어야"), 7~10%는 복리 폭주로 봇이 2분 R25~30
       // (계측: 5%→11.8 / 6%→20.7 / 7%→25.1 / 10%→29.7 — 먹이 사다리 연쇄로
       // 초민감한 다이얼이다. 만질 땐 반드시 봇 재실측).
+      // 소화 = 7.5%/s × 스핀 효율 (5.7→42% 의 게임 눈금: 0.85+0.5a — 조사 ②-23)
       const take = Math.min(
         this.streamIn * (1 - Math.exp(-2.2 * step)),
-        this.vol * 0.075 * step, // 흡입(소화) 상향 6→7.5%/s (실플레이 — 봇 재실측 게이트)
+        this.vol * 0.075 * (0.85 + 0.5 * this.spin) * step,
       )
       this.vol += take
       this.streamIn -= take
@@ -1413,7 +1466,26 @@ export class Voyage {
           this.gulp = Math.max(this.gulp, 0.3)
           continue
         }
-        ;(toShred ??= []).push(b)
+        // 스파게티 예열 — 즉발 파쇄 대신 찢김 직전의 신장 한 박 (조사 ②-15)
+        b.stretch = (b.stretch ?? 0) + step * 1.9
+        if (b.stretch >= 1) (toShred ??= []).push(b)
+      } else if (b.stretch) {
+        b.stretch = Math.max(0, b.stretch - step * 2.5)
+      }
+    }
+    // 불씨 시한 — 증발 PBH 는 기다려주지 않는다
+    for (let i = this.active.length - 1; i >= 0; i--) {
+      const b = this.active[i]!
+      if (b.decay === undefined) continue
+      b.decay -= step
+      if (b.decay <= 0) {
+        this.eaten.add(b.id)
+        this.active.splice(i, 1)
+        for (let g2 = 0; g2 < 8; g2++) {
+          const a2 = (g2 / 8) * Math.PI * 2
+          this.spawnGas(b.x, b.y, b.z, Math.cos(a2) * 500, Math.sin(a2) * 500,
+            ((g2 % 3) - 1) * 180, 6, 1.6, 1.4, 1.0, 1.1)
+        }
       }
     }
     if (toShred) for (const b of toShred) this.shred(b)
@@ -1683,6 +1755,7 @@ export class Voyage {
         for (let sb = 0; sb < 7; sb++) {
           this.captureStar(hashSeed(`sb:${this.eatCount}:${sb}`), 2 + (sb % 3), 0.75, 0.9, 1.35, 0)
         }
+        this.spin = 0.67 // 합병 잔해 스핀 (GW150914 실측)
         this.merging = null
         this.sfx('bigKill')
         this.persist()
@@ -1941,8 +2014,18 @@ export class Voyage {
     // 거쳐 부풀어 오른다 ("사람 크기부터 개큰 블랙홀까지 가는 영상": 사용자).
     // 즉시 반영은 티끌(3% 미만)만 — 즉시 문턱이 크면 요람 폭식으로 폭주한다
     // (봇 실측 30초 R22).
+    // 스핀 — 순행으로 먹으면 오르고 역행이면 내린다 (Bardeen, 손 한계 0.998).
+    // 스핀이 곧 소화 효율·제트 세기다 (조사 ②-23)
+    const lzSpin = (b.x - this.x) * (b.vy - this.vy) - (b.y - this.y) * (b.vx - this.vx)
+    this.spin = Math.max(0, Math.min(0.998,
+      this.spin + Math.sign(lzSpin) * Math.min(0.03, (bMass / this.vol) * 0.15)))
     const gain = bMass * ABSORB_GAIN
-    if (gain > this.vol * 0.08) this.streamIn += gain
+    if (gain > this.vol * 0.5) {
+      // t^(−5/3) 재강착 플레어 — 대어는 저장고에 들어가 상승(t²)→피크→멱감쇠
+      // 곡선으로 흘러든다 (조사 ②-11, TDE 광도곡선). 총질량 보존.
+      if (this.fallbacks.length < 4) this.fallbacks.push({ amt: gain, t: 0 })
+      else this.streamIn += gain
+    } else if (gain > this.vol * 0.08) this.streamIn += gain
     else this.vol += gain
     this.gulp = Math.min(1, b.r / R + 0.25)
     this.eatCount += 1
@@ -2045,7 +2128,11 @@ export class Voyage {
    * 중간은 얇고 젊은 원반(나선팔 소속), 바깥은 성긴 헤일로. age 0 = 갓 태어난 청백색.
    */
   private captureStar(h: number, size: number, cr: number, cg: number, cb: number, age: number): void {
-    if (this.halo.length >= 380) return
+    // M-σ 밸브 (조사 ②-26): 은하는 내 질량에 걸맞게만 자라고(공진화),
+    // 퀘이사 폭식 중엔 별이 못 자란다 (AGN 피드백 소광)
+    if (this.quasar > 0.75) return
+    const cap = Math.min(380, Math.round(10 + Math.pow(this.vol, 0.25) * 1.1))
+    if (this.halo.length >= cap) return
     const k = 2.2 + (h % 1000) * 0.0048 // 2.2R ~ 7R
     const tier = k < 3.2 ? 0 : k < 5.6 ? 1 : 2
     this.halo.push({
@@ -2077,10 +2164,13 @@ export class Voyage {
     this.eaten.add(b.id)
     const idx = this.active.indexOf(b)
     if (idx >= 0) this.active.splice(idx, 1)
+    // 초신성 4경로 (조사 ②-21): 쌍불안정(초거성 — 심조차 안 남는 완전 소멸) /
+    // II형(대형 — 함몰 후 폭발) / Ia형급 완전 파괴(중형) / 행성상성운(소형)
+    const pair = b.r0 > 700
     const nova = b.r0 > 260
-    for (let i = 0; i < (nova ? 22 : 14); i++) {
-      const a = (i / (nova ? 22 : 14)) * Math.PI * 2
-      const sp = nova ? 260 + b.r0 * 0.8 : 120 + b.r0 * 0.4
+    for (let i = 0; i < (pair ? 30 : nova ? 22 : 14); i++) {
+      const a = (i / (pair ? 30 : nova ? 22 : 14)) * Math.PI * 2
+      const sp = pair ? 500 + b.r0 : nova ? 260 + b.r0 * 0.8 : 120 + b.r0 * 0.4
       this.spawnGas(
         b.x + Math.cos(a) * b.r, b.y + Math.sin(a) * b.r, b.z,
         Math.cos(a) * sp + b.vx, Math.sin(a) * sp + b.vy, ((i % 3) - 1) * sp * 0.3,
@@ -2088,14 +2178,14 @@ export class Voyage {
         nova ? 1.5 : 1.1, nova ? 1.2 : 0.9, nova ? 0.9 : 1.0, 1.8,
       )
     }
-    this.spawnDeathCores(b, nova)
+    if (!pair) this.spawnDeathCores(b, nova) // 쌍불안정은 심조차 남기지 않는다
     this.waveX = b.x
     this.waveY = b.y
     this.waveZ = b.z
     this.waveT = 0
     this.feed = 1
-    this.streamIn += b.r * b.r * b.r * 0.4 * ABSORB_GAIN
-    this.camera.shake(nova ? 7 : 4, 7)
+    this.streamIn += b.r * b.r * b.r * (pair ? 0.85 : 0.4) * ABSORB_GAIN
+    this.camera.shake(pair ? 10 : nova ? 7 : 4, 7)
     const nm = nameOf(b.id)?.name
     if (nm) {
       const entry: JournalEntry = {

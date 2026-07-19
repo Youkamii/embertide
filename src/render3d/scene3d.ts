@@ -367,6 +367,8 @@ export class Scene3D {
   readonly axes: THREE.AxesHelper
   private readonly m4 = new THREE.Matrix4()
   private readonly q0 = new THREE.Quaternion()
+  private readonly qS = new THREE.Quaternion()
+  private readonly vDir = new THREE.Vector3()
   private readonly v3 = new THREE.Vector3()
   private readonly s3 = new THREE.Vector3()
   private readonly col = new THREE.Color()
@@ -512,11 +514,14 @@ export class Scene3D {
     // 강착원반 — 샤쿠라-순야예프 온도 구배(T∝r^-¾: 안쪽 백청, 바깥 적색) +
     // 케플러 차등 회전(안쪽이 빠르다) + 도플러 비밍(다가오는 쪽이 밝다) + 난류 줄무늬
     this.diskMat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uFeed: { value: 0 }, uInner: { value: 0.4 }, uTemp: { value: 1 } },
+      uniforms: {
+        uTime: { value: 0 }, uFeed: { value: 0 }, uInner: { value: 0.4 },
+        uTemp: { value: 1 }, uCam: { value: new THREE.Vector2(1, 0) },
+      },
       vertexShader: `varying vec2 vP;
 void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
       fragmentShader: `varying vec2 vP;
-uniform float uTime; uniform float uFeed; uniform float uInner; uniform float uTemp;
+uniform float uTime; uniform float uFeed; uniform float uInner; uniform float uTemp; uniform vec2 uCam;
 void main(){
   float r = length(vP);
   float T = pow(max(uInner*2.2, 1.35)/max(r, 1e-3), 0.75);
@@ -524,7 +529,12 @@ void main(){
   // 호킹 색온도 — T∝1/M: 갓난 몸은 백열, 초대질량은 검붉게 식는다 (UI 없는 질량계)
   col *= mix(vec3(1.15,0.55,0.4), vec3(1.05,1.1,1.25), uTemp);
   float phi = atan(vP.y,vP.x) - uTime*1.7*inversesqrt(max(r*r*r, 1e-4));
-  float beam = pow(1.0 + 0.28*sin(atan(vP.y,vP.x))/sqrt(max(r,1e-3)), 2.0);
+  // 진짜 도플러 비밍 — β 케플러(안쪽이 빠름) × 시선 방향: 다가오는 쪽이 δ³ 배
+  // 밝다 (조사 ②-14 — 가짜 sin 항 폐기). 카메라만 돌려도 초승달이 따라 돈다.
+  vec2 tang = vec2(-vP.y, vP.x)/max(r, 1e-3);
+  float beta = clamp(0.55*inversesqrt(max(r, 0.25)), 0.0, 0.7);
+  float cosT = dot(tang, uCam);
+  float beam = clamp(pow(1.0/(1.0 - beta*cosT), 3.0), 0.35, 3.2);
   float streak = 0.84 + 0.16*sin(phi*9.0 + r*14.0);
   // 안쪽 가장자리는 검은 몸(uInner)에 붙는다. 휴면(uFeed 0)엔 거의 안 보이고
   // 먹을 때만 점화한다 — 실제 휴면 블랙홀의 문법 (ED·실물리)
@@ -887,8 +897,22 @@ void main(){
         sc = Math.max(sc, dCam * theta)
       }
       this.v3.set(ax, ay, az)
-      this.s3.setScalar(Math.max(0.6, sc))
-      this.m4.compose(this.v3, this.q0, this.s3)
+      // 스파게티 신장 — 찢김 직전, 내 쪽 축으로 늘어나고 수직으로 눌린다
+      if (b.stretch && b.stretch > 0.03) {
+        const st = Math.min(1, b.stretch)
+        this.vDir.set(px - ax, py - ay, pz - az).normalize()
+        this.s3.set(0, 1, 0)
+        this.qS.setFromUnitVectors(this.s3, this.vDir)
+        this.s3.set(
+          Math.max(0.6, sc) * (1 - st * 0.38),
+          Math.max(0.6, sc) * (1 + st * 2.4),
+          Math.max(0.6, sc) * (1 - st * 0.38),
+        )
+        this.m4.compose(this.v3, this.qS, this.s3)
+      } else {
+        this.s3.setScalar(Math.max(0.6, sc))
+        this.m4.compose(this.v3, this.q0, this.s3)
+      }
       if (b.id === PULSAR_ID) {
         pulsarSeen = true
         pulsarX = ax
@@ -957,21 +981,34 @@ void main(){
         }
         continue
       }
-      // 항성질량 블랙홀(백조자리 X-1) — 동족이다: 검은 구 + 백열 강착 테
+      // 항성질량 블랙홀(백조자리 X-1·IMBH) — 동족이다: 검은 몸 + 기울어진
+      // 강착 원반 + 광자 글로우 (X선 쌍성의 실제 초상 — "이미지 꼬라지" 수리)
       if (b.kind === BodyKind.Core) {
         if (litN < MAX_INST) {
+          this.v3.set(ax, ay, az)
+          this.s3.setScalar(Math.max(0.6, sc * 0.34)) // 몸은 작다 — 원반이 크기를 말한다
+          this.m4.compose(this.v3, this.q0, this.s3)
           this.lit.setMatrixAt(litN, this.m4)
-          this.col.setRGB(0.02, 0.02, 0.03)
+          this.col.setRGB(0.01, 0.01, 0.02)
           this.lit.setColorAt(litN, this.col)
           litN++
+        }
+        if (ringN < this.rings.length) {
+          const rm = this.rings[ringN++]!
+          rm.visible = true
+          rm.position.set(ax, ay, az)
+          rm.scale.setScalar(sc * 1.35)
+          rm.rotation.x = -Math.PI / 2 + 0.5 + ((b.id % 100) - 50) * 0.004
+          ;(rm.material as THREE.MeshBasicMaterial).color.setRGB(1.5, 0.85, 0.45)
+          ;(rm.material as THREE.MeshBasicMaterial).opacity = 0.9
         }
         if (glowN < MAX_GLOW) {
           const sp = this.glows[glowN++]!
           sp.visible = true
           sp.position.set(ax, ay, az)
-          sp.scale.setScalar(sc * 2.2)
-          sp.material.color.setRGB(1, 0.82, 0.5)
-          sp.material.opacity = 0.7
+          sp.scale.setScalar(sc * 0.9)
+          sp.material.color.setRGB(1.2, 0.9, 0.6)
+          sp.material.opacity = 0.75
         }
         continue
       }
@@ -1080,6 +1117,7 @@ void main(){
           rm.position.set(ax, ay, az)
           rm.scale.setScalar(sc)
           rm.rotation.x = -Math.PI / 2 + ((b.id % 100) - 50) * 0.006
+          ;(rm.material as THREE.MeshBasicMaterial).color.setRGB(1, 1, 1)
           ;(rm.material as THREE.MeshBasicMaterial).opacity = 0.85
         }
       }
@@ -1262,10 +1300,19 @@ void main(){
     const hawkT = Math.max(0, Math.min(1, 1.1 - Math.log10(g.vol + 10) / 9))
     this.diskMat.uniforms['uTemp']!.value = hawkT
     this.lensPass.uniforms['uTemp']!.value = hawkT
+    // 도플러용 카메라 시선 (원반 평면 투영)
+    {
+      const cdx = this.camera.position.x - px
+      const cdz = this.camera.position.z - pz
+      const cl = Math.hypot(cdx, cdz) || 1
+      ;(this.diskMat.uniforms['uCam']!.value as THREE.Vector2).set(cdx / cl, cdz / cl)
+    }
+    // 제트는 스핀이 민다 (BZ 과정 ∝ a² — 조사 ②-23)
+    const jetK = 0.5 + g.spin * 0.8
     for (let i = 0; i < this.jets.length; i++) {
       const jet = this.jets[i]!
       const s = i === 0 ? 1 : -1
-      const power = g.quasar
+      const power = g.quasar * jetK
       jet.position.set(px, py + s * R * 2.6 * Math.max(0.3, power), pz)
       jet.scale.set(R * (0.5 + power), R * (0.6 + power * 2.2), R * (0.5 + power))
       ;(jet.material as THREE.MeshBasicMaterial).opacity = power * 0.5

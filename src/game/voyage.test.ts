@@ -203,8 +203,18 @@ describe('검은 입', () => {
     g.vy = 0
     g.vz = 0
     const id = target!.id
-    g.update(mockInput(0, 0), 1 / 60)
-    expect(g.active.some((b) => b.id === id), '원본은 사라졌다').toBe(false)
+    // 스파게티 예열(조사 ②-15) — 즉발이 아니라 ~0.6초 신장 후 찢긴다
+    for (let s = 0; s < 70; s++) {
+      g.x = target!.x + (R + target!.r) * 1.02
+      g.y = target!.y
+      g.z = target!.z
+      g.vx = 0
+      g.vy = 0
+      g.vz = 0
+      g.update(mockInput(0, 0), 1 / 60)
+      if (!g.active.some((b) => b.id === id)) break
+    }
+    expect(g.active.some((b) => b.id === id), '원본은 사라졌다 (예열 후 파쇄)').toBe(false)
     const cores = g.active.filter((b) => b.hot)
     expect(cores.length, '심이 남았다').toBeGreaterThanOrEqual(1)
     for (const c of cores) {
