@@ -48,8 +48,9 @@ function at(ly: number, angleDeg: number, name: string): { x: number; y: number;
   const d = pxOf(ly)
   const a = (angleDeg * Math.PI) / 180
   const h = hashSeed(`map:${name}`)
-  // z 는 그 거리에 닿을 몸집의 z 슬랩(0.8·시야) 안에 있어야 한다 — 못 닿는 명소는 고문이다
-  const z = (((h % 1000) / 1000 - 0.5) * Math.min(4400, d * 0.016))
+  // 별은 구형으로 흩어져 있다 — z ±35% 거리 (구 z-슬랩 시절의 1.6% 압착은
+  // "별자리가 일렬"을 만들던 유물: 실플레이. z 상한 폐지로 전부 닿는다)
+  const z = (((h % 1000) / 1000 - 0.5) * 0.7 * d)
   return { x: Math.cos(a) * d, y: Math.sin(a) * d, z }
 }
 

@@ -21,7 +21,7 @@ import type { Renderer } from '../engine/renderer'
 import { Rng, hashSeed } from '../engine/rng'
 import { Shape } from '../engine/shapes'
 import { HOLES, KUIPER, PROBES, SHELL, STAR_MAP, pxOf, type MapSystem } from './starmap'
-import { catalogName, nameOf, realName, registerName, starLog, starName, type RealName } from './starnames'
+import { nameOf, registerName } from './starnames'
 
 /** 섹터 시드 상수 — 절차 채움(오르트 얼음·떠돌이)의 결정론 유지 */
 export const UNIVERSE_SEED = 20260718
@@ -143,6 +143,8 @@ export interface Body {
   free: boolean
   /** 조석 파괴의 심 — 뜨겁게 그린다 */
   hot: boolean
+  /** 파편의 출신 — 원본의 실명. 파편을 먹으면 이 이름이 뜬다 (절차 이름 금지) */
+  origin?: string
 }
 
 export interface JournalEntry {
@@ -327,6 +329,7 @@ export class Voyage {
   region = ''
   private regionCd = 0
   private mapNearS = 1e9
+  private preyLockId = 0
 
   private readonly gas: Gas[] = []
   private gasIdx = 0
@@ -770,8 +773,8 @@ export class Voyage {
         const dSeed = hashSeed(`${seed}:kb:${i}`)
         const d = this.newBody(dSeed, BodyKind.Dust,
           sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
-          1.6 + rng.next() * 2.6, 0.6, 0.64, 0.72)
-        d.z = (rng.next() - 0.5) * 1300
+          2.2 + rng.next() * 3.4, 0.6, 0.64, 0.72)
+        d.z = (rng.next() - 0.5) * rC * 0.25 // 벨트 — 도톰한 원반
         list.push(d)
       }
     } else if (rC >= SHELL.kuiperOut && rC < SHELL.scatterOut) {
@@ -782,7 +785,7 @@ export class Voyage {
         const d = this.newBody(dSeed, BodyKind.Dust,
           sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
           2 + rng.next() * 3, 0.58, 0.6, 0.7)
-        d.z = (rng.next() - 0.5) * 1600
+        d.z = (rng.next() - 0.5) * rC * 0.45 // 산란 원반 — 부풀어 오른다
         list.push(d)
       }
     } else if (rC >= SHELL.oortIn && rC < SHELL.oortOut) {
@@ -793,7 +796,7 @@ export class Voyage {
         const d = this.newBody(dSeed, BodyKind.Dust,
           sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
           1.8 + rng.next() * 4.4, 0.62, 0.68, 0.8)
-        d.z = (rng.next() - 0.5) * 4200
+        d.z = (rng.next() - 0.5) * rC * 0.9 // 오르트는 원반이 아니라 **구껍질**이다
         list.push(d)
       }
     } else if (rC >= SHELL.oortOut) {
@@ -1317,13 +1320,16 @@ export class Voyage {
           this.feed = 1
           this.gulp = Math.max(this.gulp, 0.7)
           this.camera.shake(4, 7)
-          const entry: JournalEntry = {
-            name: this.nameBody(b).name, log: '', kind: b.kind,
-            r: Math.round(b.r0), x: Math.round(b.x), y: Math.round(b.y),
+          const cnm = nameOf(b.id)?.name ?? b.origin
+          if (cnm) {
+            const entry: JournalEntry = {
+              name: cnm, log: '', kind: b.kind,
+              r: Math.round(b.r0), x: Math.round(b.x), y: Math.round(b.y),
+            }
+            this.journal.push(entry)
+            this.lastFound = entry
+            this.persistSoon()
           }
-          this.journal.push(entry)
-          this.lastFound = entry
-          this.persistSoon()
           this.sfx('kill')
           continue
         }
@@ -1632,9 +1638,13 @@ export class Voyage {
     let sgX = 0
     let sgY = 0
     let sgZ = 0
+    let sgId = 0
     let cX = 0
     let cY = 0
     let cZ = 0
+    let meatyId = 0
+    let lockB: Body | null = null
+    let lockD = Infinity
     for (const b of this.active) {
       if (this.eaten.has(b.id)) continue
       const d = Math.hypot(b.x - this.x, b.y - this.y, b.z - this.z)
@@ -1643,6 +1653,10 @@ export class Voyage {
       // 영영 안 붙는다 (계측 0~5%). 간식에 서고 싶으면 키를 놓으면 된다 —
       // 순항 해제(4.5/s)가 도착 브레이크보다 빠르다.
       if (b.r >= R * 0.8 && d - b.r < anyDist) anyDist = d - b.r
+      if (b.id === this.preyLockId && b.r * b.r * b.r < this.vol) {
+        lockB = b
+        lockD = d
+      }
       if (b.r >= R * EDIBLE) {
         // 공성 대상 — 통째론 못 삼켜도 질량이 내 밑이면 내 먹이다: 나침반이
         // 잡아야 한다 ("보이지도 않아서 먹지도 못하네": 실플레이)
@@ -1651,6 +1665,7 @@ export class Voyage {
           sgX = b.x
           sgY = b.y
           sgZ = b.z
+          sgId = b.id
         }
         continue
       }
@@ -1662,6 +1677,7 @@ export class Voyage {
           this.preyX = b.x
           this.preyY = b.y
           this.preyZ = b.z
+          meatyId = b.id
         }
       } else if (d < crumbDist) {
         crumbDist = d
@@ -1676,6 +1692,18 @@ export class Voyage {
       this.preyX = sgX
       this.preyY = sgY
       this.preyZ = sgZ
+      meatyId = sgId
+    }
+    // 표적 락온 — 문 표적은 먹거나 사라지거나 새 후보가 확실히(1.5배) 가까워질
+    // 때까지 유지한다. 매 프레임 최근접 재계산은 자동 항법을 떠돌게 만든다
+    // ("혼자 여기저기 떠돌아 뭔 알고리즘인지도 모르겠어": 실플레이).
+    if (lockB && lockD < this.preyDist * 1.5) {
+      this.preyDist = lockD
+      this.preyX = lockB.x
+      this.preyY = lockB.y
+      this.preyZ = lockB.z
+    } else {
+      this.preyLockId = meatyId
     }
     this.nearAny = anyDist
     // 다음 항로 — 지도 항성계 곁("도착")이 아니라면 **언제나** 계산해 HUD 에
@@ -1820,30 +1848,6 @@ export class Voyage {
     g.max = life
   }
 
-  /** 이름 — 등록부(실지도) 먼저, 그다음 실명 풀, 이름 없는 티끌만 절차 이름. */
-  private nameBody(b: Body): RealName {
-    const reg = nameOf(b.id)
-    if (reg) return reg
-    // 등록부에 없는 잡천체는 실제 카탈로그 명명법 — 유명 이름 돌려쓰기 금지 (중복 도배)
-    switch (b.kind) {
-      case BodyKind.Sun:
-        return catalogName(b.r < 55 ? 'brown' : 'star', b.id)
-      case BodyKind.Garden:
-        return realName('nebula', b.id)
-      case BodyKind.Core:
-        return realName('galaxy', b.id)
-      case BodyKind.Comet:
-        return catalogName('icomet', b.id)
-      case BodyKind.Ringed:
-      case BodyKind.Rock:
-        return catalogName('rogue', b.id)
-      default:
-        return b.r >= 10
-          ? catalogName('minor', b.id)
-          : { name: starName(b.id), log: starLog(b.id) }
-    }
-  }
-
   /** 삼킴 확정 — 부피·운동량(3D)·명부·TDE 가스 분출. */
   private swallow(b: Body): void {
     const R = this.radius
@@ -1878,11 +1882,12 @@ export class Voyage {
       this.sfx('boom')
     }
     this.sfx(b.r > R * 0.45 ? 'evolve' : 'pickup')
-    if (b.kind !== BodyKind.Dust || b.r >= 10) {
-      // 감상 문구 없음 — 명부는 이름·크기·좌표만 기록한다 (문구 기능 전면 폐지: 실플레이)
-      const rn = b.hot ? null : this.nameBody(b)
+    // 이름은 실명뿐 — 등록부(실지도)에 있거나 파편의 출신(origin)이 실명일 때만
+    // 명부·화면에 남는다. 절차 이름("…의 잔해"·카탈로그 번호)은 표시 금지 (실플레이).
+    const nm = nameOf(b.id)?.name ?? b.origin
+    if (nm) {
       const entry: JournalEntry = {
-        name: rn ? rn.name : `${starName(b.id)}의 잔해`,
+        name: nm,
         log: '',
         kind: b.kind,
         r: Math.round(b.r),
@@ -1925,20 +1930,23 @@ export class Voyage {
     this.gulp = Math.max(this.gulp, 0.6)
     this.feed = Math.max(this.feed, 0.55)
     this.camera.shake(3, 7)
-    if (b.kind !== BodyKind.Dust || b.r >= 10) {
-      const entry: JournalEntry = {
-        name: this.nameBody(b).name,
-        log: '',
-        kind: b.kind,
-        r: Math.round(b.r),
-        x: Math.round(b.x),
-        y: Math.round(b.y),
+    {
+      const nm = nameOf(b.id)?.name ?? b.origin
+      if (nm) {
+        const entry: JournalEntry = {
+          name: nm,
+          log: '',
+          kind: b.kind,
+          r: Math.round(b.r),
+          x: Math.round(b.x),
+          y: Math.round(b.y),
+        }
+        this.journal.push(entry)
+        this.lastFound = entry
+        this.persistSoon()
+      } else {
+        this.dirty = true
       }
-      this.journal.push(entry)
-      this.lastFound = entry
-      this.persistSoon()
-    } else {
-      this.dirty = true
     }
     this.sfx('kill')
   }
@@ -1999,17 +2007,20 @@ export class Voyage {
     this.feed = 1
     this.streamIn += b.r * b.r * b.r * 0.4 * ABSORB_GAIN
     this.camera.shake(nova ? 7 : 4, 7)
-    const entry: JournalEntry = {
-      name: `${this.nameBody(b).name} — ${nova ? '초신성' : '행성상성운'}`,
-      log: '',
-      kind: b.kind,
-      r: Math.round(b.r0),
-      x: Math.round(b.x),
-      y: Math.round(b.y),
+    const nm = nameOf(b.id)?.name
+    if (nm) {
+      const entry: JournalEntry = {
+        name: nm,
+        log: '',
+        kind: b.kind,
+        r: Math.round(b.r0),
+        x: Math.round(b.x),
+        y: Math.round(b.y),
+      }
+      this.journal.push(entry)
+      this.lastFound = entry
+      this.persistSoon()
     }
-    this.journal.push(entry)
-    this.lastFound = entry
-    this.persistSoon()
     this.sfx('nova')
   }
 
@@ -2020,6 +2031,7 @@ export class Voyage {
     const sy = Math.floor(b.y / SECTOR)
     const list = this.sectorBodies(sx, sy)
     const n = nova ? 7 : 1
+    const originName = nameOf(b.id)?.name ?? b.origin
     for (let i = 0; i < n; i++) {
       const dSeed = hashSeed(`${b.id}:sn:${i}`)
       if (this.eaten.has(dSeed)) continue
@@ -2033,6 +2045,7 @@ export class Voyage {
       d.z = b.z
       d.free = true
       d.hot = true
+      d.origin = originName
       const sp = nova ? 200 + b.r0 * 0.5 : 40
       d.vx = Math.cos(a) * sp + b.vx
       d.vy = Math.sin(a) * sp + b.vy
@@ -2049,6 +2062,7 @@ export class Voyage {
     const sy = Math.floor(b.y / SECTOR)
     const list = this.sectorBodies(sx, sy)
     const minR = Math.min(2.2, this.radius * 0.35)
+    const originName = nameOf(b.id)?.name ?? b.origin
     for (let i = 0; i < 2; i++) {
       const dSeed = hashSeed(`${b.id}:sh:${i}`)
       if (this.eaten.has(dSeed)) continue
@@ -2060,6 +2074,7 @@ export class Voyage {
       d.z = b.z
       d.free = true
       d.hot = true
+      d.origin = originName
       const speed = 150 + this.radius * 1.2
       d.vx = Math.cos(a) * speed * 0.3 + -Math.sin(a) * speed * 0.8 + b.vx
       d.vy = Math.sin(a) * speed * 0.3 + Math.cos(a) * speed * 0.8 + b.vy

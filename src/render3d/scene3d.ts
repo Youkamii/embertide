@@ -139,6 +139,102 @@ function smokeTexture(): THREE.Texture {
 }
 
 /**
+ * 성운 — 연기가 아니라 **발광 성운**이다 (실플레이 "성운이 뭔지 모르나").
+ * 다층 발광 구름(분홍 H-알파·청록 산소·보라) + 어두운 먼지 띠 + 박힌 어린 별들.
+ */
+function nebulaTexture(seed: number): THREE.Texture {
+  const c = document.createElement('canvas')
+  c.width = c.height = 256
+  const ctx = c.getContext('2d')!
+  let s = seed
+  const rnd = (): number => {
+    s = (s * 16807) % 2147483647
+    return s / 2147483647
+  }
+  const HUES: readonly [number, number, number][] = [
+    [255, 90, 130], [90, 200, 220], [170, 110, 255], [255, 150, 90],
+  ]
+  // 발광 구름 — 색이 다른 층을 겹겹이
+  for (let i = 0; i < 34; i++) {
+    const a = rnd() * Math.PI * 2
+    const rr = rnd() * rnd() * 92
+    const x = 128 + Math.cos(a) * rr
+    const y = 128 + Math.sin(a) * rr * (0.7 + rnd() * 0.3)
+    const r = 14 + rnd() * 44
+    const [hr, hg, hb] = HUES[(seed + i) % HUES.length]!
+    const g = ctx.createRadialGradient(x, y, 1, x, y, r)
+    g.addColorStop(0, `rgba(${hr},${hg},${hb},${0.1 + rnd() * 0.14})`)
+    g.addColorStop(0.6, `rgba(${hr},${hg},${hb},0.05)`)
+    g.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, 256, 256)
+  }
+  // 어두운 먼지 띠 — 창조의 기둥 같은 실루엣
+  ctx.globalCompositeOperation = 'destination-out'
+  for (let i = 0; i < 7; i++) {
+    ctx.beginPath()
+    ctx.ellipse(60 + rnd() * 136, 60 + rnd() * 136, 4 + rnd() * 26, 2 + rnd() * 7, rnd() * 3, 0, 6.28)
+    ctx.fillStyle = `rgba(0,0,0,${0.5 + rnd() * 0.4})`
+    ctx.fill()
+  }
+  ctx.globalCompositeOperation = 'source-over'
+  // 박힌 어린 별들 — 별 성(星) 자의 이유
+  for (let i = 0; i < 46; i++) {
+    const x = 30 + rnd() * 196
+    const y = 30 + rnd() * 196
+    const r = 0.6 + rnd() * 1.6
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3)
+    g.addColorStop(0, 'rgba(255,255,255,0.9)')
+    g.addColorStop(0.3, 'rgba(200,220,255,0.4)')
+    g.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(x - r * 3, y - r * 3, r * 6, r * 6)
+  }
+  return new THREE.CanvasTexture(c)
+}
+
+/** 은하 — 팽대부 + 로그 나선팔 두 개 + 별 알갱이 (Core 대형 전용) */
+function galaxyTexture(seed: number): THREE.Texture {
+  const c = document.createElement('canvas')
+  c.width = c.height = 256
+  const ctx = c.getContext('2d')!
+  let s = seed
+  const rnd = (): number => {
+    s = (s * 16807) % 2147483647
+    return s / 2147483647
+  }
+  const bulge = ctx.createRadialGradient(128, 128, 1, 128, 128, 34)
+  bulge.addColorStop(0, 'rgba(255,240,210,0.95)')
+  bulge.addColorStop(0.5, 'rgba(255,220,170,0.4)')
+  bulge.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = bulge
+  ctx.fillRect(0, 0, 256, 256)
+  for (const arm of [0, Math.PI]) {
+    for (let t = 0; t < 60; t++) {
+      const th = t / 60
+      const ang = arm + th * 3.6 + rnd() * 0.1
+      const rr = 12 + th * 108
+      const x = 128 + Math.cos(ang) * rr
+      const y = 128 + Math.sin(ang) * rr * 0.62
+      const r = 7 + (1 - th) * 12
+      const blue = th > 0.35
+      const g = ctx.createRadialGradient(x, y, 1, x, y, r)
+      g.addColorStop(0, blue ? `rgba(150,180,255,${0.1 + rnd() * 0.08})` : `rgba(255,225,180,${0.12 + rnd() * 0.08})`)
+      g.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx.fillStyle = g
+      ctx.fillRect(0, 0, 256, 256)
+    }
+  }
+  for (let i = 0; i < 60; i++) {
+    const x = 20 + rnd() * 216
+    const y = 50 + rnd() * 156
+    ctx.fillStyle = `rgba(255,255,255,${0.25 + rnd() * 0.5})`
+    ctx.fillRect(x, y, 1.2, 1.2)
+  }
+  return new THREE.CanvasTexture(c)
+}
+
+/**
  * 행성 표면 — 절차 생성 (외부 에셋은 단일 파일 원칙상 불가, 대신 굽는다).
  * 회색조로 만들어 몸색 틴트가 곱해지게 — 8장으로 수백 행성이 다 달라 보인다.
  */
@@ -254,6 +350,9 @@ export class Scene3D {
   private readonly planetMeshes: THREE.Mesh[] = []
   private readonly planetTex: THREE.Texture[] = []
   private readonly planetTexId: number[] = []
+  private readonly nebTex: THREE.Texture[] = []
+  private readonly galTex: THREE.Texture[] = []
+  private readonly nebMapId: number[] = []
 
   private readonly ecliptic: THREE.PolarGridHelper
   /** 랜드마크 — 실지도 항성계는 아무리 멀어도 밝은 별점으로 보인다 (항법의 잣대) */
@@ -354,12 +453,15 @@ export class Scene3D {
       this.marks.push(sp)
       this.scene.add(sp)
     }
+    for (let i = 0; i < 4; i++) this.nebTex.push(nebulaTexture(313 + i * 97))
+    for (let i = 0; i < 3; i++) this.galTex.push(galaxyTexture(511 + i * 131))
     for (let i = 0; i < MAX_NEB; i++) {
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({
         map: smokeTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
       }))
       sp.visible = false
       this.nebSprites.push(sp)
+      this.nebMapId.push(-1)
       this.scene.add(sp)
     }
     // 게 펄서 등대 빔 — 자전축에서 기운 자기축을 따라 두 줄기가 우주를 쓸고 돈다.
@@ -537,12 +639,14 @@ void main(){
       this.scene.add(ring)
     }
 
-    // 랜드마크 별점 + 이름 라벨 — 성운·은하는 하늘의 뿌연 얼룩으로 항상 보인다
+    // 랜드마크 별점 + 이름 라벨 — 성운·은하는 하늘에서도 제 모습으로 보인다
     // ("은하도 성운도 없어": 실플레이 — 지도엔 있는데 하늘에서 안 읽혔다)
     for (let i = 0; i < STAR_MAP.length; i++) {
       const sys = STAR_MAP[i]!
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: sys.kind === 'sun' ? glowTex : smokeTex,
+        map: sys.kind === 'sun' ? glowTex
+          : sys.kind === 'garden' ? this.nebTex[i % this.nebTex.length]!
+            : this.galTex[i % this.galTex.length]!,
         blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
       }))
       sp.material.color.setRGB(
@@ -661,6 +765,7 @@ void main(){
     const w0 = this.renderer.domElement.clientWidth
     const h0 = Math.max(1, this.renderer.domElement.clientHeight)
     let labelN = 0
+    const placedLb: [number, number][] = []
     const skyR = dist * 30
     for (let i = 0; i < STAR_MAP.length; i++) {
       const sys = STAR_MAP[i]!
@@ -678,14 +783,22 @@ void main(){
       const imp = sys.kind === 'core' ? 6 : sys.kind === 'garden' ? 4 : 1
       sp.scale.setScalar(skyR * 0.01 * imp)
       sp.material.opacity = sys.kind === 'sun' ? 0.6 : 0.38
-      // 라벨 — 화면 안에 있고 가까운 순 다섯
+      // 라벨 — 화면 안에 있고 가까운 순 다섯. 겹치면 아래로 밀어낸다 (실플레이)
       if (labelN < 5) {
         this.v3.copy(sp.position).project(this.camera)
         if (this.v3.z < 1 && Math.abs(this.v3.x) < 0.95 && Math.abs(this.v3.y) < 0.92) {
           const lb = this.labels[labelN++]!
           lb.style.display = 'block'
-          lb.style.left = `${((this.v3.x + 1) / 2) * w0 + 8}px`
-          lb.style.top = `${((1 - this.v3.y) / 2) * h0 - 6}px`
+          const lx = ((this.v3.x + 1) / 2) * w0 + 8
+          let lyy = ((1 - this.v3.y) / 2) * h0 - 6
+          for (let rep = 0; rep < 4; rep++) {
+            for (const p of placedLb) {
+              if (Math.abs(lyy - p[1]) < 16 && Math.abs(lx - p[0]) < 180) lyy = p[1] + 18
+            }
+          }
+          placedLb.push([lx, lyy])
+          lb.style.left = `${lx}px`
+          lb.style.top = `${lyy}px`
           const lyd = d3 / LY
           lb.textContent = `${sys.name} · ${lyd >= 1 ? `${lyd.toFixed(1)}광년` : `${Math.round(d3 / 1000)}k`}`
         }
@@ -777,34 +890,36 @@ void main(){
         pulsarZ = az
         pulsarR = sc
       }
-      // 성운·은하 — 구체가 아니라 연기의 군집이다 ("가도 점 하나": 실플레이).
-      // 은하(Core 대형)는 나선을 그리는 납작한 원반, 성운은 두툼한 뭉게구름.
+      // 성운·은하 — 전용 텍스처: 성운은 발광 구름+먼지 띠+박힌 어린 별,
+      // 은하는 팽대부+나선팔 ("성운은 연기네ㅋㅋ": 실플레이 — 회색 연기 폐기).
       if (b.kind === BodyKind.Garden || (b.kind === BodyKind.Core && b.r > 600)) {
         const isCore = b.kind === BodyKind.Core
-        const blobs = isCore ? 10 : 7
-        for (let k = 0; k < blobs && nebN < MAX_NEB; k++) {
-          const hh = (b.id + k * 2654435761) >>> 0
-          const a1 = (hh % 628) * 0.01
-          const rad = sc * (isCore ? 0.12 + ((hh >>> 8) % 100) * 0.008 : 0.2 + ((hh >>> 8) % 100) * 0.009)
-          const spiral = isCore ? a1 + (rad / sc) * 3.4 : a1
-          const zz = (((hh >>> 16) % 100) - 50) * 0.01 * sc * (isCore ? 0.16 : 0.5)
-          const sp = this.nebSprites[nebN++]!
+        const texArr = isCore ? this.galTex : this.nebTex
+        const ti = (isCore ? 100 : 0) + (b.id % texArr.length)
+        if (nebN < MAX_NEB) {
+          const sp = this.nebSprites[nebN]!
           sp.visible = true
-          sp.position.set(ax + Math.cos(spiral) * rad, ay + zz, az + Math.sin(spiral) * rad)
-          sp.scale.setScalar(sc * (isCore ? 0.45 : 0.7) * (0.6 + ((hh >>> 20) % 60) * 0.01))
-          // 삼켜지는 중이면 연기도 붉게 저문다 (redK — 적색편이 연출 일관성)
+          if (this.nebMapId[nebN] !== ti) {
+            sp.material.map = texArr[b.id % texArr.length]!
+            sp.material.needsUpdate = true
+            this.nebMapId[nebN] = ti
+          }
+          sp.material.rotation = (b.id % 628) * 0.01
           sp.material.color.setRGB(
-            b.cr * 0.42 * (1 + redK * 0.9), b.cg * 0.4 * (1 - redK * 0.5), b.cb * 0.5 * (1 - redK * 0.7),
+            Math.min(1, 0.9 + redK), Math.min(1, 0.9 * (1 - redK * 0.5)), Math.min(1, 0.95 * (1 - redK * 0.6)),
           )
-          sp.material.opacity = isCore ? 0.3 : 0.24
+          sp.material.opacity = isCore ? 0.85 : 0.75
+          sp.position.set(ax, ay, az)
+          sp.scale.setScalar(sc * (isCore ? 2.3 : 2.7))
+          nebN++
         }
         if (glowN < MAX_GLOW) {
           const sp = this.glows[glowN++]!
           sp.visible = true
           sp.position.set(ax, ay, az)
-          sp.scale.setScalar(sc * (isCore ? 0.7 : 1.3))
+          sp.scale.setScalar(sc * (isCore ? 0.6 : 0.9))
           sp.material.color.setRGB(Math.min(1, b.cr * 0.9), Math.min(1, b.cg * 0.8), Math.min(1, b.cb))
-          sp.material.opacity = isCore ? 0.5 : 0.3
+          sp.material.opacity = isCore ? 0.45 : 0.22
         }
         // 먹이 금테 — 성운도 한 입이 되면 표적으로 읽혀야 한다
         if (markN < MAX_MARK && b.r < R * 0.8 && b.r >= R * 0.1) {
