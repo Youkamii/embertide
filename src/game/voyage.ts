@@ -1205,8 +1205,12 @@ export class Voyage {
           // 거리의 행성이 더 세게 뜯겨 오고, 태양을 삼킨 몸 곁에선 온 행성계가
           // 레일을 이탈해 낙하한다. 상한도 크게 열려야 "빨아들이는 위력"이
           // 질량과 함께 어마어마해진다 (실플레이 — R300 에서 고작 2배였다).
-          const heavy = (1 + R / 60) * surgeK
-          const capMe = PULL_CAP_BY_ME * (1 + R / 80) * surgeK
+          // 기본 당김을 과부하의 1/3 질감으로 상향 (실플레이 "과부하가 일반적인
+          // 움직임 같다" — 끌려오는 맛은 상시, 신 모드는 H). 페이스(소화)는 불변.
+          // 강화는 R12(검은 입 문턱)부터 차오른다 — 티끌 초반 페이스 보존 (계측).
+          const grip = 1 + 2 * Math.min(1, R / 12)
+          const heavy = (1 + R / 60) * grip * surgeK
+          const capMe = PULL_CAP_BY_ME * (1 + R / 80) * (0.8 + 0.6 * grip) * surgeK
           let g = Math.min(capMe, (R * R * GRAV * MAW_PULL * heavy) / d2)
           // 동역학 마찰 항적 (조사 ㉒, Chandrasekhar): 내가 지나간 뒤편의 것들이
           // 항적 밀도에 끌려 뒤늦게 따라 떨어진다 — 후방 보정 (경량판)
@@ -1282,7 +1286,9 @@ export class Voyage {
               const Lz = Math.abs(dx * rvy - dy * rvx)
               if (Lz < R * Math.sqrt(GRAV * MAW_PULL * R) * 0.5) b.doomed = true
             }
-            const kt = Math.exp(-step * 0.7 * prox * prox)
+            // 강착 나선 — 접선 마찰이 각운동량을 갉아 "돌다가 점점 안으로"
+            // 감겨 들어온다 (실플레이 "언제까지 돌 건데"). 질량 지배·근접 비례.
+            const kt = Math.exp(-step * (0.35 + 0.45 * domV) * proxV * proxV)
             let tx = (rvx - (rvx * ux + rvy * uy + rvz * uz) * ux) * kt
             let ty = (rvy - (rvx * ux + rvy * uy + rvz * uz) * uy) * kt
             let tz = (rvz - (rvx * ux + rvy * uy + rvz * uz) * uz) * Math.exp(-step * 2.2 * prox)
