@@ -134,6 +134,13 @@ function boot(): void {
     'font:800 18px/1.6 ui-monospace,monospace;color:#ffb066;white-space:pre;' +
     'text-shadow:0 0 14px rgba(255,140,40,.55);display:none;'
   ui.appendChild(expEl)
+  // 행복도 100% 섬광 — 화면 전체가 한 번 하얗게-분홍으로 울고 잦아든다
+  const flashEl = document.createElement('div')
+  flashEl.style.cssText =
+    'position:absolute;inset:0;pointer-events:none;opacity:0;' +
+    'background:radial-gradient(circle at center,rgba(255,236,244,.95),rgba(255,158,192,.5) 45%,rgba(255,176,102,0) 80%);'
+  ui.appendChild(flashEl)
+  let morphPrev = 0
 
   let started = false
   const center = document.createElement('div')
@@ -292,6 +299,7 @@ function boot(): void {
     game.rankUp = null
     if (game.region && game.region !== lastRegion) {
       lastRegion = game.region
+      rankEl.style.color = '#ffe6b8'
       rankEl.textContent = game.region
       rankEl.style.opacity = '1'
       rankUntil = now + 3200
@@ -362,7 +370,7 @@ function boot(): void {
       expBtn.style.display = 'none'
       if (game.expT < 10) {
         expEl.style.display = 'block'
-        expEl.textContent = `행복도 0% · ${Math.ceil(10 - game.expT)}`
+        expEl.textContent = `행복기능 가동까지 ${Math.ceil(10 - game.expT)}초`
       } else if (game.expT < 40) {
         // 행복도 — 붕괴 30초에 걸쳐 1→100% (사용자 사양)
         expEl.style.display = 'block'
@@ -370,6 +378,26 @@ function boot(): void {
       } else {
         expEl.style.display = 'none'
       }
+      // 행복도 100% 도달 — 시공이 한 번 운다: 중력파 + 흔들림 + 섬광 + 선언
+      if (game.morph >= 1 && morphPrev < 1 && game.expT < 45) {
+        game.waveX = game.x
+        game.waveY = game.y
+        game.waveZ = game.z
+        game.waveT = 0
+        game.feed = 1
+        game.camera.shake(9, 7)
+        flashEl.style.transition = 'none'
+        flashEl.style.opacity = '0.95'
+        requestAnimationFrame(() => {
+          flashEl.style.transition = 'opacity 2.4s ease-out'
+          flashEl.style.opacity = '0'
+        })
+        rankEl.textContent = '행복도 100%'
+        rankEl.style.color = '#ffb8c8'
+        rankEl.style.opacity = '1'
+        rankUntil = now + 3800
+      }
+      morphPrev = game.morph
     }
     coords.textContent =
       `${game.region || '태양계'}  ·  질량 ${mass}${surgeOn ? '  ·  과부하 ×1000' : ''}\n` +

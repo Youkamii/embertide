@@ -75,12 +75,16 @@ describe('검은 입', () => {
     g.start(null)
     g.vol = volFor(21) // R = 21 — 천왕성·해왕성이 먹이가 되는 크기
     const R = g.radius
+    // 명부 계약이므로 **실명 있는** 먹이만 — 활성 목록 순서는 시야(rangeN)에
+    // 따라 변해서, 무명 혜성이 먼저 걸리면 명부가 빈다 (rangeN 24 확장 때 실측)
     const prey = g.active.find(
-      (b) => b.r < R * 0.7 && b.r > 2 && (b.kind !== BodyKind.Dust || b.r >= 10),
+      (b) => b.r < R * 0.7 && b.r > 2 && nameOf(b.id) !== undefined,
     )
     expect(prey, '태양계에 이름 있는 먹이가 있다').toBeTruthy()
     const vol0 = g.vol
-    chase(g, prey!, 90)
+    // 240프레임 — 강화된 진공(R·70)이 잔챙이로 포식 슬롯 8개를 계속 채워,
+    // 실명 먹이의 프로즌 완료가 밀릴 수 있다 (90프레임에서 미완 실측)
+    chase(g, prey!, 240)
     expect(g.vol, '부피가 붙었다').toBeGreaterThan(vol0)
     expect(g.eatenThisRun, '삼킨 수가 센다').toBeGreaterThan(0)
     expect(g.journal.length, '명부에 남았다').toBeGreaterThan(0)
@@ -117,9 +121,10 @@ describe('검은 입', () => {
     g.start(store)
     g.vol = volFor(21)
     const prey = g.active.find(
-      (b) => b.r < g.radius * 0.7 && b.r > 2 && (b.kind !== BodyKind.Dust || b.r >= 10),
+      (b) => b.r < g.radius * 0.7 && b.r > 2 && nameOf(b.id) !== undefined,
     )!
-    chase(g, prey, 120)
+    chase(g, prey, 240)
+    g.flush() // 배치 저장의 마지막 조각 — 재시작 전에 명부를 확정한다
     expect(g.journal.length).toBeGreaterThan(0)
     const eatenName = g.journal[0]!.name
 

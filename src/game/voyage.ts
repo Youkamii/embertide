@@ -1350,7 +1350,9 @@ export class Voyage {
     // 3D 원근은 지평선까지 보인다 — 캡 12(약 29k px): 7(17k)은 "좀만 멀어지면
     // 아무것도 안 보이는" 시야 절벽이었다 (실플레이). 성간 섹터 생성은 저렴함이
     // 계측돼 있다 (적대 리뷰).
-    return Math.min(12, Math.max(1, Math.ceil((this.camera.viewHeight * 1.5) / SECTOR)))
+    // 캡 24 — 12(29k px)는 거대한 몸의 시야보다 좁아 화면 안에서 천체가
+    // "출현"했다 ("커지면 안 보이던 곳에서 뭐가 막 날아와": 실플레이)
+    return Math.min(24, Math.max(1, Math.ceil((this.camera.viewHeight * 1.5) / SECTOR)))
   }
 
   private refreshSectors(force = false): void {
@@ -1655,8 +1657,12 @@ export class Voyage {
             // 다이렉트로 떨어지지 않고 감기며 강착원반을 이루다 흘러든다.
             const prox = R / (d + R)
             // 소용돌이는 우물 안쪽의 것 — 멀리서는 직류로 흘러들어야 낙하가 된다
-            // (베이스 0.45 를 원거리에 주면 먹이가 낙하 대신 궤도를 돈다: 계측)
-            const swirl = Math.min(0.86, prox * (2.2 + FRAME_DRAG))
+            // (베이스 0.45 를 원거리에 주면 먹이가 낙하 대신 궤도를 돈다: 계측).
+            // 지배가 압도적이면 소용돌이를 접는다 — 접선 주입(g·swirl)이 나선
+            // 감쇠보다 빨라 "미친 속도로 영원히 도는" 평형 궤도를 만든다
+            // (실플레이 H: "끌려오다가 평생 궤도만 돌아"). 압도된 것은 떨어진다.
+            const domSw = Math.min(6, volE / (b.r * b.r * b.r + 1))
+            const swirl = Math.min(0.86, prox * (2.2 + FRAME_DRAG)) / (1 + domSw * 0.9)
             // 에르고스피어 강제 동조 — 몸(bodyR)의 2.2배 안에서는 역행이 물리적
             // 으로 불가능하다: 상대 접선 속도를 내 스핀 방향(반시계)으로 강제
             // 정렬 (조사 ②-4, 커 시공 틀 끌림 ω∝r⁻³)
@@ -1703,7 +1709,8 @@ export class Voyage {
             // 사거리 R·70 — R·40 은 원거리 포획체가 나선 없이 안정 원궤도로
             // "평생 도는" 밴드를 남겼다 ("왜 안 빨려들어와": 실플레이)
             const proxV = (R * 70) / (d + R * 70)
-            const domV = Math.min(6, volE / (b.r * b.r * b.r + 1))
+            // 상한 14 — 6은 과부하에서 나선이 접선 주입을 못 이겼다 (실플레이)
+            const domV = Math.min(14, volE / (b.r * b.r * b.r + 1))
             const vr = vr0 > 0
               ? vr0
               : vr0 * Math.exp(-step * mK * 5 * proxV * (1 + domV) * (this.surge ? 30 : 1))
@@ -2492,8 +2499,10 @@ export class Voyage {
       const n = 2 + rng.int(2)
       for (let i = 0; i < n; i++) {
         const a = rng.next() * Math.PI * 2
-        // 거리도 화면 눈금 비례 — 절대거리면 거대한 입(R·3.2)이 스폰을 그 자리에서 삼킨다
-        const dd = base * (0.55 + rng.next() * 1.7)
+        // 거리도 화면 눈금 비례 — 절대거리면 거대한 입(R·3.2)이 스폰을 그 자리에서
+        // 삼킨다. **화면 밖**(순항 시야 2.2배+)에서만 — 안에서 태어나면 "없던 게
+        // 갑자기 날아온다" (실플레이)
+        const dd = base * (2.4 + rng.next() * 2.2)
         const id = hashSeed(`drift:${this.driftN}:${i}`)
         if (this.eaten.has(id)) continue
         const d = this.newBody(id, BodyKind.Dust,
