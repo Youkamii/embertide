@@ -367,6 +367,8 @@ export class Scene3D {
   /** 시작은 지평선 구도(0.3) — 지구가 하늘의 절반을 덮는 각도 */
   pitch = 0.3
   zoomBias = 1
+  /** 줌아웃 상한 — 몸이 클수록 열린다 ("커지면 더 멀리서도 보게": 실플레이) */
+  private zoomMax = 2.4
 
   private readonly lit: THREE.InstancedMesh
   private readonly emis: THREE.InstancedMesh
@@ -800,7 +802,7 @@ void main(){
     canvas.addEventListener('pointercancel', endDrag)
     canvas.addEventListener('lostpointercapture', endDrag)
     canvas.addEventListener('wheel', (e) => {
-      this.zoomBias = Math.min(2.4, Math.max(0.45, this.zoomBias * (e.deltaY > 0 ? 1.1 : 0.9)))
+      this.zoomBias = Math.min(this.zoomMax, Math.max(0.45, this.zoomBias * (e.deltaY > 0 ? 1.1 : 0.9)))
       e.preventDefault()
     }, { passive: false })
   }
@@ -831,6 +833,10 @@ void main(){
 
     // 카메라 — 티끌일 땐 몸의 ~14배까지 바짝(행성이 하늘을 채운다), R5부터 표준
     const kCam = 0.78 - 0.36 * Math.max(0, 1 - R / 5)
+    // 줌아웃 상한은 몸 크기 비례 (R300부터 열려 R1300에서 ×6) — 시야가 넓어진
+    // 만큼 게임 쪽 활성 반경(rangeN)도 viewZoom 으로 따라온다
+    this.zoomMax = 2.4 + Math.min(3.6, Math.max(0, (R - 300) / 280))
+    g.viewZoom = this.zoomBias
     const dist = g.camera.viewHeight * kCam * this.zoomBias
     const cp = Math.cos(this.pitch)
     this.camera.position.set(

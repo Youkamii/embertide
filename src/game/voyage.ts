@@ -349,6 +349,8 @@ export class Voyage {
   /** 블랙홀 실험 — 버튼을 누르면 10초 카운트, 10~40초 붕괴, 40초 완성 (사용자 사양) */
   expOn = false
   expT = 0
+  /** 렌더 줌아웃 배율 (scene 이 매 프레임 보고) — 활성 반경이 시야를 따라간다 */
+  viewZoom = 1
   /** 자동 항법 중인가 — z 수렴 같은 보조는 이때만 (main 이 매 프레임 세팅) */
   navAssist = false
   /** 클릭 지정 목적지 — 속도·제동·z 수렴이 전부 이 좌표 기준 (main 세팅) */
@@ -1350,9 +1352,12 @@ export class Voyage {
     // 3D 원근은 지평선까지 보인다 — 캡 12(약 29k px): 7(17k)은 "좀만 멀어지면
     // 아무것도 안 보이는" 시야 절벽이었다 (실플레이). 성간 섹터 생성은 저렴함이
     // 계측돼 있다 (적대 리뷰).
-    // 캡 24 — 12(29k px)는 거대한 몸의 시야보다 좁아 화면 안에서 천체가
-    // "출현"했다 ("커지면 안 보이던 곳에서 뭐가 막 날아와": 실플레이)
-    return Math.min(24, Math.max(1, Math.ceil((this.camera.viewHeight * 1.5) / SECTOR)))
+    // 캡 48 + 줌 연동 — 고정 캡은 "인근만 렌더링"이 된다 (실플레이). 줌아웃할
+    // 수록 활성 반경이 따라 늘어난다. 완전 무제한은 메모리가 아니라 **물리
+    // 루프(CPU)**가 못 버틴다 — 성간 섹터는 비어서 싸고, 캡 48(±115k px)이
+    // 실용 한계다.
+    return Math.min(48, Math.max(1,
+      Math.ceil((this.camera.viewHeight * Math.max(1, this.viewZoom) * 1.5) / SECTOR)))
   }
 
   private refreshSectors(force = false): void {
