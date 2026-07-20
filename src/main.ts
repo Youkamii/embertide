@@ -362,10 +362,11 @@ function boot(): void {
       expBtn.style.display = 'none'
       if (game.expT < 10) {
         expEl.style.display = 'block'
-        expEl.textContent = `곧 행복해진다  ${Math.ceil(10 - game.expT)}`
+        expEl.textContent = `행복도 0% · ${Math.ceil(10 - game.expT)}`
       } else if (game.expT < 40) {
+        // 행복도 — 붕괴 30초에 걸쳐 1→100% (사용자 사양)
         expEl.style.display = 'block'
-        expEl.textContent = `행복해지는 중  ${Math.ceil(40 - game.expT)}`
+        expEl.textContent = `행복도 ${Math.max(1, Math.round(game.morph * 100))}%`
       } else {
         expEl.style.display = 'none'
       }
