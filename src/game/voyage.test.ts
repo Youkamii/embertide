@@ -552,5 +552,5 @@ describe('검은 입', () => {
     // 사용자 지시("흡입 속도 올려")로 26→34 완화 (실측 30.0).
     expect(g.radius, `과속 금지 (r=${g.radius.toFixed(1)})`).toBeLessThan(34)
     expect(worstStarve, '최장 기아 구간(초)').toBeLessThan(30)
-  })
+  }, 20000) // 실척 우주(활성창 2배·밀도장)로 시뮬이 무거워짐 — 5초 기본을 넘는다
 })

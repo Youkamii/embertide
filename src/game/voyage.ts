@@ -20,7 +20,8 @@ import type { Input } from '../engine/input'
 import type { Renderer } from '../engine/renderer'
 import { Rng, hashSeed } from '../engine/rng'
 import { Shape } from '../engine/shapes'
-import { HOLES, KUIPER, PROBES, SHELL, STAR_MAP, pxOf, type MapSystem } from './starmap'
+import { armProximity, galacticCyl, galaxyDensityAt, galaxyOf } from './galaxy'
+import { HOLES, KUIPER, PROBES, SHELL, STAR_MAP, type MapSystem } from './starmap'
 import { nameOf, registerName } from './starnames'
 
 /** 섹터 시드 상수 — 절차 채움(오르트 얼음·떠돌이)의 결정론 유지 */
@@ -29,6 +30,30 @@ export const UNIVERSE_SEED = 20260718
 /** 실지도 항성계의 몸체 id — 다음 항로 나침반이 "이미 삼킨 계"를 거르는 데 쓴다 */
 const MAP_IDS: readonly number[] = STAR_MAP.map((s) => hashSeed(`map:${s.name}`))
 const HOLE_IDS: readonly number[] = HOLES.map((h) => hashSeed(`hole:${h.name}`))
+
+/** 별셀 — 밀도장 표본화 격자 (아키텍처 §3-2). SECTOR(2400)와 분리: 밀도
+ *  초월함수 평가를 셀당 1회로 캐시해 프레임당 ~4회로 만든다. */
+const SCELL = 262144
+/** 밀도 → 셀당 기대 항성계 수 계수 — 원반 중반 동시 활성 ~1~4 목표 (§8-3) */
+const SYS_PER_RHO = 8
+
+interface FieldSeed {
+  readonly x: number
+  readonly y: number
+  readonly z: number
+  readonly galId: number
+  readonly arm: number
+  readonly h: number
+}
+
+/** 실명 계 양보 반경 — field 항성이 실지도 계 위에 겹쳐 태어나지 않게 (§8-5) */
+function nearRealSystem(x: number, y: number): boolean {
+  for (const s of STAR_MAP) {
+    const rr = Math.max(60000, s.r * 8)
+    if (Math.abs(x - s.x) < rr && Math.abs(y - s.y) < rr) return true
+  }
+  return false
+}
 
 const SECTOR = 2400
 /** 삼킬 수 있는 크기 비율 — 내 반지름의 이 배수 미만이면 먹이다 */
@@ -165,6 +190,8 @@ export interface Body {
   stretch?: number
   /** 증발 시한 (초) — 원시 블랙홀 불씨: 제때 못 삼키면 최후 폭발 (조사 ②-20) */
   decay?: number
+  /** 은하 소속 id — 절차 field 천체의 "무소속 0" 각인 (아키텍처 §3-3) */
+  gal?: number
 }
 
 export interface JournalEntry {
@@ -290,6 +317,8 @@ export class Voyage {
   readonly active: Body[] = []
   private activeKey = ''
   private readonly eaten = new Set<number>()
+  /** 별셀 캐시 — SCELL 격자당 결정론 항성계 씨앗 (Phase 4) */
+  private readonly starCells = new Map<string, FieldSeed[]>()
   private solSun: Body | null = null
 
   // ── 포식
@@ -445,6 +474,7 @@ export class Voyage {
     this.spin = 0.3
     this.journal.length = 0
     this.eaten.clear()
+    this.starCells.clear()
     this.farthest = 0
     this.lastFound = null
     this.absorbs.length = 0
@@ -1130,6 +1160,82 @@ export class Voyage {
     }
   }
 
+  /** 별셀의 결정론 항성계 씨앗 — 밀도 평가는 셀당 1회, 캐시 (아키텍처 §3-2).
+   *  씨드는 정수 hash 만 — 부동소수·순서 의존 금지 (P0 결정론 방벽이 잰다) */
+  private cellSystems(cx: number, cy: number): readonly FieldSeed[] {
+    const key = `${cx},${cy}`
+    const hit = this.starCells.get(key)
+    if (hit) return hit
+    if (this.starCells.size > 512) this.starCells.clear()
+    const out: FieldSeed[] = []
+    this.starCells.set(key, out)
+    const rng = new Rng(hashSeed(`sc:${cx}:${cy}`))
+    const mx = (cx + 0.5) * SCELL
+    const my = (cy + 0.5) * SCELL
+    const G0 = galaxyOf(mx, my, 0)
+    if (!G0) return out // 은하간 공허 — 씨앗 없음 (무소속 0 의 게이트)
+    const rho = galaxyDensityAt(G0, mx, my, 0)
+    const expectN = Math.min(26, rho * SYS_PER_RHO) // 상한 26 — 팽대부 폭주 방지 (§8-3)
+    const n = Math.floor(expectN) + (rng.next() < expectN % 1 ? 1 : 0)
+    for (let i = 0; i < n; i++) {
+      const x = (cx + rng.next()) * SCELL
+      const y = (cy + rng.next()) * SCELL
+      const G = galaxyOf(x, y, 0)
+      if (G === null) continue // 경계 재확인 — 헤일로 밖 씨앗 폐기
+      const [r2, th] = galacticCyl(G, x, y, 0)
+      // z — 얇은 원반: 팽대부 소속만 두껍다 (조사① 수직 구조)
+      const zSpread = r2 < G.rBulge ? G.rBulge * 0.5 : G.hThin * 1.6
+      const z = (rng.next() - 0.5) * 2 * zSpread
+      out.push({ x, y, z, galId: G.id, arm: armProximity(G, r2, th), h: hashSeed(`sc:${cx}:${cy}:${i}`) })
+    }
+    return out
+  }
+
+  /** field 항성계 — IMF(적색왜성 다수) + 나선팔 위 청백 편향 + 행성 반반 */
+  private buildFieldSystem(fsd: FieldSeed, list: Body[]): void {
+    const rng = new Rng(fsd.h)
+    // 우주 노화 (조사 ㉗ 경량판) — 회차가 쌓일수록 푸른 별이 준다
+    const ep = Math.min(2, Math.floor((this.voyages - 1) / 4)) * 0.05
+    let roll = rng.next() - ep
+    // 나선팔 크레스트 = 젊은 청백 편향 (조사② — 팔은 밝기 대비다)
+    if (fsd.arm > 0.4 && rng.next() < 0.5) roll = 0.84 + rng.next() * 0.15
+    let sr: number
+    let scr: number
+    let scg: number
+    let scb: number
+    if (roll < 0.55) {
+      sr = 40 + rng.next() * 55 // M 적색왜성 — 우주의 다수
+      scr = 1.2; scg = 0.5; scb = 0.32
+    } else if (roll < 0.72) {
+      sr = 65 + rng.next() * 60 // K 주황왜성
+      scr = 1.5; scg = 0.9; scb = 0.5
+    } else if (roll < 0.84) {
+      sr = 85 + rng.next() * 70 // G 노란별 — 태양형
+      scr = 1.8; scg = 1.5; scb = 0.75
+    } else if (roll < 0.93) {
+      sr = 115 + rng.next() * 130 // A·B 청백색
+      scr = 1.6; scg = 1.7; scb = 2.0
+    } else if (roll < 0.985) {
+      sr = 260 + rng.next() * 340 // 적색거성
+      scr = 1.9; scg = 0.85; scb = 0.4
+    } else {
+      sr = 400 + rng.next() * 500 // 청색 초거성 — 귀하다
+      scr = 1.0; scg = 1.2; scb = 2.2
+    }
+    const b = this.newBody(hashSeed(`fss:${fsd.h}`), BodyKind.Sun, fsd.x, fsd.y, sr, scr, scg, scb)
+    b.z = fsd.z
+    b.gal = fsd.galId
+    list.push(b)
+    if (rng.next() < 0.5) {
+      const pb = this.newBody(hashSeed(`fss:${fsd.h}:p`), BodyKind.Rock, b.x, b.y,
+        Math.max(4, b.r * (0.05 + rng.next() * 0.07)), 0.55, 0.55, 0.65)
+      this.setOrbit(pb, b, b.r * (2.3 + rng.next()), rng.next() * Math.PI * 2, 1, 0,
+        (rng.next() - 0.5) * 0.3)
+      pb.gal = fsd.galId
+      list.push(pb)
+    }
+  }
+
   private sectorBodies(sx: number, sy: number): Body[] {
     const key = `${sx},${sy}`
     let list = this.sectors.get(key)
@@ -1225,93 +1331,66 @@ export class Voyage {
         list.push(d)
       }
     } else if (rC >= SHELL.oortOut) {
-      // 성간 공간 — 여기부터는 한세월이다. 떠돌이 행성, 갈색왜성, 성간 방문자뿐
-      if (rng.next() < 0.05) {
-        const id = hashSeed(`${seed}:rg`)
-        const b = this.newBody(id, rng.next() < 0.2 ? BodyKind.Ringed : BodyKind.Rock,
-          sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
-          9 + rng.next() * 17, 0.5, 0.5, 0.62)
-        b.z = (rng.next() - 0.5) * 4800
-        b.free = true
-        list.push(b)
-      }
-      if (rng.next() < 0.02) {
-        const id = hashSeed(`${seed}:bd`)
-        const b = this.newBody(id, BodyKind.Sun,
-          sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
-          30 + rng.next() * 22, 0.8, 0.4, 0.3)
-        b.z = (rng.next() - 0.5) * 4800
-        list.push(b)
-      }
-      if (rng.next() < 0.012) {
-        // 꺼져가는 불씨 — 증발 임계의 원시 블랙홀: 제때 못 삼키면 최후 폭발로
-        // 소멸한다 (조사 ②-20, 호킹 증발 dM/dt=−B/M²). 시한부 별미.
-        const id = hashSeed(`${seed}:pbh`)
-        const b = this.newBody(id, BodyKind.Dust,
-          sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
-          2.6, 1.5, 1.25, 0.9)
-        b.z = (rng.next() - 0.5) * rC * 0.5
-        b.free = true
-        b.hot = true
-        b.decay = 45 + rng.next() * 60
-        list.push(b)
-      }
-      if (rng.next() < 0.015) {
-        const id = hashSeed(`${seed}:ic`)
-        const b = this.newBody(id, BodyKind.Comet,
-          sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
-          6 + rng.next() * 6, 0.8, 0.9, 1.0)
-        b.z = (rng.next() - 0.5) * 4800
-        b.vx = (rng.next() - 0.5) * 400
-        b.vy = (rng.next() - 0.5) * 400
-        b.free = true
-        list.push(b)
-      }
-      // 16광년 너머 — 일반 항성 들판. 분광형은 실제 빈도를 따른다: 우주의
-      // 다수는 적색왜성(M)이고, 청색 초거성은 귀하다 ("적색왜성 청색왜성
-      // 이런 건 왜 없어": 실플레이).
-      if (rC > pxOf(16) && rng.next() < 0.07) {
-        const id = hashSeed(`${seed}:fs`)
-        const far = rC > pxOf(600)
-        // 우주 노화 (조사 ㉗, 경량판): 회차가 쌓일수록 같은 하늘이 늙는다 —
-        // 푸른 별이 줄고 백색왜성·적색왜성이 는다 (항성 최종질량함수)
-        const ep = Math.min(2, Math.floor((this.voyages - 1) / 4)) * 0.05
-        const roll = rng.next() - ep
-        let sr: number
-        let scr: number
-        let scg: number
-        let scb: number
-        if (roll < 0.55) {
-          sr = 40 + rng.next() * 55 // M 적색왜성 — 우주의 다수
-          scr = 1.2; scg = 0.5; scb = 0.32
-        } else if (roll < 0.72) {
-          sr = 65 + rng.next() * 60 // K 주황왜성
-          scr = 1.5; scg = 0.9; scb = 0.5
-        } else if (roll < 0.84) {
-          sr = 85 + rng.next() * 70 // G 노란별 — 태양형
-          scr = 1.8; scg = 1.5; scb = 0.75
-        } else if (roll < 0.93) {
-          sr = 115 + rng.next() * 130 // A·B 청백색
-          scr = 1.6; scg = 1.7; scb = 2.0
-        } else if (roll < 0.985) {
-          sr = far ? 420 + rng.next() * 700 : 260 + rng.next() * 340 // 적색거성
-          scr = 1.9; scg = 0.85; scb = 0.4
-        } else {
-          sr = far ? 600 + rng.next() * 900 : 400 + rng.next() * 500 // 청색 초거성
-          scr = 1.0; scg = 1.2; scb = 2.2
+      // ── 은하 밀도장 field (Phase 4, 아키텍처 §3-2) — 무소속 스폰의 종언.
+      // 모든 성간 천체는 어느 은하의 부피 안에서만 태어나 gal 을 각인받는다.
+      // galaxyOf=null 인 은하간 공허는 빈 섹터 — 물리도 렌더도 없는 진짜 공허.
+      const secX = (sx + 0.5) * SECTOR
+      const secY = (sy + 0.5) * SECTOR
+      const Gsec = galaxyOf(secX, secY, 0)
+      if (Gsec) {
+        // 항성계 — SCELL 별셀 시딩: 팽대부는 촘촘, 원반 변두리는 성기게,
+        // 나선팔 위는 청백 편향 (밀도장이 곧 우주의 지도다)
+        for (const fsd of this.cellSystems(
+          Math.floor(secX / SCELL), Math.floor(secY / SCELL))) {
+          if (Math.floor(fsd.x / SECTOR) !== sx || Math.floor(fsd.y / SECTOR) !== sy) continue
+          if (nearRealSystem(fsd.x, fsd.y)) continue // 실명 계 양보 (§8-5)
+          this.buildFieldSystem(fsd, list)
         }
-        const b = this.newBody(id, BodyKind.Sun,
-          sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
-          sr, scr, scg, scb)
-        b.z = (rng.next() - 0.5) * 6000
-        list.push(b)
-        if (rng.next() < 0.5) {
-          const pId = hashSeed(`${seed}:fsp`)
-          const pb = this.newBody(pId, BodyKind.Rock, b.x, b.y,
-            Math.max(4, b.r * (0.05 + rng.next() * 0.07)), 0.55, 0.55, 0.65)
-          this.setOrbit(pb, b, b.r * (2.3 + rng.next()), rng.next() * Math.PI * 2, 1, 0,
-            (rng.next() - 0.5) * 0.3)
-          list.push(pb)
+        // 떠돌이 행성·갈색왜성·불씨·성간 혜성 — 은하의 주민들 (소속 각인)
+        if (rng.next() < 0.05) {
+          const id = hashSeed(`${seed}:rg`)
+          const b = this.newBody(id, rng.next() < 0.2 ? BodyKind.Ringed : BodyKind.Rock,
+            sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
+            9 + rng.next() * 17, 0.5, 0.5, 0.62)
+          b.z = (rng.next() - 0.5) * 4800
+          b.free = true
+          b.gal = Gsec.id
+          list.push(b)
+        }
+        if (rng.next() < 0.02) {
+          const id = hashSeed(`${seed}:bd`)
+          const b = this.newBody(id, BodyKind.Sun,
+            sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
+            30 + rng.next() * 22, 0.8, 0.4, 0.3)
+          b.z = (rng.next() - 0.5) * 4800
+          b.gal = Gsec.id
+          list.push(b)
+        }
+        if (rng.next() < 0.012) {
+          // 꺼져가는 불씨 — 증발 임계의 원시 블랙홀: 제때 못 삼키면 최후
+          // 폭발로 소멸한다 (조사 ②-20). z 는 실척에서 rC 비례 금지 — 4800.
+          const id = hashSeed(`${seed}:pbh`)
+          const b = this.newBody(id, BodyKind.Dust,
+            sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
+            2.6, 1.5, 1.25, 0.9)
+          b.z = (rng.next() - 0.5) * 4800
+          b.free = true
+          b.hot = true
+          b.decay = 45 + rng.next() * 60
+          b.gal = Gsec.id
+          list.push(b)
+        }
+        if (rng.next() < 0.015) {
+          const id = hashSeed(`${seed}:ic`)
+          const b = this.newBody(id, BodyKind.Comet,
+            sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
+            6 + rng.next() * 6, 0.8, 0.9, 1.0)
+          b.z = (rng.next() - 0.5) * 4800
+          b.vx = (rng.next() - 0.5) * 400
+          b.vy = (rng.next() - 0.5) * 400
+          b.free = true
+          b.gal = Gsec.id
+          list.push(b)
         }
       }
     }
@@ -2508,6 +2587,9 @@ export class Voyage {
     // 공허는 비어 있어야 순항이 살고, 재보급은 천체 곁에서만 이뤄진다.
     if (this.driftCd <= 0 && this.active.length < 900 && this.nearAny <= base * 3) {
       this.driftCd = 6
+      // 은하간 공허에선 부스러기도 없다 — 무소속 0 (아키텍처 §3-3의 4번째 경로)
+      const Gd = galaxyOf(this.x, this.y, 0)
+      if (Gd) {
       this.driftN += 1
       const rng = new Rng(hashSeed(`drift:${this.driftN}`))
       const n = 2 + rng.int(2)
@@ -2525,10 +2607,12 @@ export class Voyage {
           0.55, 0.52, 0.62)
         d.z = this.z + (rng.next() - 0.5) * 500
         d.free = true
+        d.gal = Gd.id
         const sx = Math.floor(d.x / SECTOR)
         const sy = Math.floor(d.y / SECTOR)
         this.sectors.get(`${sx},${sy}`)?.push(d)
         this.active.push(d)
+      }
       }
     }
 
