@@ -1465,7 +1465,9 @@ void main(){
         py + sa * rr * Math.sin(h.inc),
         pz + sa * rr * Math.cos(h.inc),
       )
-      this.s3.setScalar(Math.max(h.size, R * 0.02))
+      // 크기 바닥 R·0.045 — 0.02는 시야(R·20+)의 0.1%라 있어도 안 보였다
+      // ("별들 안 보여": 실플레이). 상한 R·0.14 — 별이 몸을 가리면 안 된다.
+      this.s3.setScalar(Math.min(R * 0.14, Math.max(h.size, R * 0.045)))
       this.m4.compose(this.v3, this.q0, this.s3)
       this.haloMesh.setMatrixAt(haloN, this.m4)
       // 별의 나이 — 갓 태어난 별은 청백색, 60초에 걸쳐 식는다. 팽대부는 늙고 붉다
