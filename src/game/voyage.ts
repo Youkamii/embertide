@@ -2114,7 +2114,8 @@ export class Voyage {
           // 은하화 — 티끌은 삼키면서 **별빛만 헤일로에 남는다**. 종전엔 삼킴
           // 없이 편입만 해서 큰 체급의 성장이 정체됐다 ("안 빨려들어오고 평생
           // 돌아" + 질량 정체: 실플레이). 질량은 언제나 내 것이다.
-          if (R > 60 && b.r < R * 0.045 && this.halo.length < 380) {
+          // 문턱 R25 — 60은 은하가 너무 늦게 왔다 ("허들 좀 낮춰줘": 실플레이)
+          if (R > 25 && b.r < R * 0.045 && this.halo.length < 380) {
             this.captureStar(b.id >>> 0, b.r, b.cr, b.cg, b.cb, 0)
             this.swallow(b)
             continue

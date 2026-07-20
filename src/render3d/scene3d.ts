@@ -1532,11 +1532,16 @@ void main(){
       }
     }
     this.disk.position.set(px, py, pz)
-    // 원반도 몸 눈금 — 영향권(R) 눈금이면 티끌 곁에서 화면을 덮는다
-    this.disk.scale.setScalar(Math.min(R, BR * 3) * Math.max(0.001, g.morph))
+    // 원반은 몸 눈금 + **가르강튀아 지수** — 커질수록 원반이 넓어지고(최대
+    // 4배) 항상 은은히 타오른다 ("커지면 이펙트를 더 화려하고 넓게": 실플레이).
+    // 티끌 눈금에선 grand≈0 이라 "장식이 몸보다 큰" 과거 판정은 재발 안 한다.
+    const grand = Math.min(3, R / 300)
+    const diskR = Math.min(R, BR * 3) * (1 + grand)
+    this.disk.scale.setScalar(diskR * Math.max(0.001, g.morph))
     this.diskMat.uniforms['uTime']!.value = t
-    this.diskMat.uniforms['uFeed']!.value = Math.min(1, g.feed + g.quasar * 0.7)
-    this.diskMat.uniforms['uInner']!.value = Math.max(0.03, (BR / R) * 1.2)
+    this.diskMat.uniforms['uFeed']!.value = Math.min(1, g.feed + g.quasar * 0.7 + grand * 0.12)
+    this.diskMat.uniforms['uInner']!.value = Math.max(0.02, (BR / Math.max(1, diskR)) * 1.2)
+    this.bloom.strength = 0.5 + grand * 0.35
     // 호킹 색온도 T∝1/M — 질량이 클수록 검붉게 (조사 ②-8, 계수 1.23e23 정정판)
     const hawkT = Math.max(0, Math.min(1, 1.1 - Math.log10(g.vol + 10) / 9))
     this.diskMat.uniforms['uTemp']!.value = hawkT
@@ -1567,9 +1572,13 @@ void main(){
     // 휴면 블랙홀은 티끌이다 — 그림자·왜곡을 작게, 성장(질량)에만 비례해 커진다
     // ("지금도 크잖아": 몸이 아니라 이 장식들이 컸다)
     const screenK = Math.tan((this.camera.fov * Math.PI) / 360) * dist * 2
-    // 붕괴 중엔 렌즈도 태아다 — 그림자·왜곡이 morph 로 차오른다
-    this.lensPass.uniforms['uR']!.value = Math.max(0.003, (BR * 0.6 * g.morph) / screenK)
-    this.lensPass.uniforms['uE']!.value = Math.max(0.008, ((BR + (R - BR) * 0.18) * g.morph) / screenK)
+    // 붕괴 중엔 렌즈도 태아다 — 그림자·왜곡이 morph 로 차오르고,
+    // 커지면 가르강튀아 지수로 넓어진다 (grand = min(3, R/300))
+    const grandL = Math.min(3, R / 300)
+    this.lensPass.uniforms['uR']!.value =
+      Math.max(0.003, (BR * 0.6 * (1 + grandL * 0.35) * g.morph) / screenK)
+    this.lensPass.uniforms['uE']!.value =
+      Math.max(0.008, ((BR + (R - BR) * 0.18) * (1 + grandL * 0.8) * g.morph) / screenK)
     this.lensPass.uniforms['uAspect']!.value = w / h
     this.lensPass.uniforms['uQuasar']!.value = g.quasar
     // 중력파 → 렌즈 물결
