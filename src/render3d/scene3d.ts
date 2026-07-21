@@ -81,7 +81,7 @@ void main(){
     float front = uWaveT * 0.62;                          // 파면이 바깥으로 퍼진다
     float env = exp(-pow((dw - front) / 0.30, 2.0)) * (1.0 - uWaveT / 1.6);
     float ripple = sin((dw - front) * 30.0) * env;        // 여러 마루의 물결
-    vec2 qw = vUv + (pw / max(dw, 1e-4)) * ripple * 0.055; // 오직 굴절 — 배경만 휜다
+    vec2 qw = vUv + (pw / max(dw, 1e-4)) * ripple * 0.02; // 오직 미묘한 굴절 — 배경만 살짝 휜다
     col = texture2D(tDiffuse, qw).rgb;
   }
   // 중력 적색편이 — 지평선 근처를 빠져나온 빛은 붉고 어둡다
