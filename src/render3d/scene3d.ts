@@ -73,14 +73,17 @@ void main(){
   // 렌즈 배율 — 은은하게 (과하면 링이 화면을 지배한다)
   float mag = clamp(d / max(abs(b), 2e-3), 1.0, 2.2);
   col *= mix(1.0, mag, 0.25);
-  // 중력파 — 시공의 물결이 화면을 실제로 출렁이며 지나간다 (합병의 흔적)
+  // 중력파 — 시공이라는 연못의 물결. 여러 마루가 동심원으로 퍼지며 그 자리
+  // 배경 별빛을 굴절시킨다 (고리가 아니라 공간을 타고 지나가는 파동).
   if (uWaveT < 1.6) {
     vec2 pw = vUv - uWaveC; pw.x *= uAspect;
     float dw = length(pw);
-    float band = exp(-pow((dw - uWaveT*0.55)/0.03, 2.0));
-    vec2 qw = vUv + (pw/max(dw,1e-4)) * band * 0.016 * (1.0-uWaveT/1.6);
-    col = max(col, texture2D(tDiffuse, qw).rgb);
-    col += vec3(0.35,0.4,0.7) * band * (1.0-uWaveT/1.6) * 0.35;
+    float front = uWaveT * 0.62;                          // 파면이 바깥으로 퍼진다
+    float env = exp(-pow((dw - front) / 0.26, 2.0)) * (1.0 - uWaveT / 1.6);
+    float ripple = sin((dw - front) * 34.0) * env;        // 여러 마루의 물결
+    vec2 qw = vUv + (pw / max(dw, 1e-4)) * ripple * 0.035; // 물결 따라 공간이 굴절
+    col = texture2D(tDiffuse, qw).rgb;
+    col += vec3(0.3, 0.4, 0.62) * abs(ripple) * 0.5;      // 마루에 은은한 빛
   }
   // 중력 적색편이 — 지평선 근처를 빠져나온 빛은 붉고 어둡다
   float gz = sqrt(clamp(1.0 - uR*0.92/max(d,1e-3), 0.0, 1.0));
@@ -660,7 +663,7 @@ void main(){
     this.scene.add(this.disk)
     // 상대론적 쌍제트 — 회전축으로 collimated(가늘게 모인) 나선 빔 (M87 제트: 조사).
     // 가는 빛기둥이 뿌리서 솟아 나선으로 꼬이며 끝으로 흩어진다 (원뿔이 아니다).
-    const coneGeo = new THREE.CylinderGeometry(0.22, 0.06, 4, 24, 20, true)
+    const coneGeo = new THREE.CylinderGeometry(0.055, 0.055, 4.5, 20, 26, true)
     this.jetMat = new THREE.ShaderMaterial({
       uniforms: { uTime: { value: 0 }, uPower: { value: 0 } },
       vertexShader: `
@@ -1708,7 +1711,8 @@ void main(){
     }
     // 제트는 스핀이 민다 (BZ 과정 ∝ a² — 조사 ②-23)
     const jetK = 0.5 + g.spin * 0.8
-    const power = g.quasar * jetK
+    // 블랙홀 완성(morph=1) 후에만 — 붕괴 중엔 제트 없다. 크기는 아래 scale 이 R 로 준다.
+    const power = g.morph >= 0.999 ? g.quasar * jetK : 0
     for (let i = 0; i < this.jets.length; i++) {
       const jet = this.jets[i]!
       const s = i === 0 ? 1 : -1
