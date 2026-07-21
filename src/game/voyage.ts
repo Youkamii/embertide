@@ -1724,11 +1724,17 @@ export class Voyage {
       if (this.eaten.has(b.id)) continue
       if (b.host && this.eaten.has(b.host.id)) {
         if (b.host.id === EARTH_ID) {
-          b.host = this.me // 지구는 내가 됐다 — 달은 나(플레이어)를 계속 돈다
+          b.host = this.me // 지구=나: 평범한 지구일 땐 달이 나를 공전한다
         } else {
           b.free = true // 호스트를 잃으면 구심력을 잃는다 — 마지막 접선 속도로 산개
           b.host = null
         }
+      }
+      // 붕괴가 시작되면(morph>0) 나를 돌던 달은 레일을 벗어나 강착으로 빨려든다
+      // — 이후는 아래 '내 중력' 패스가 morph² 로 자연히 나선 낙하시킨다
+      if (b.host === this.me && this.morph > 0.02) {
+        b.free = true
+        b.host = null
       }
       if (!b.free && b.orbR > 0) {
         let rr = b.orbR
