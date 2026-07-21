@@ -162,7 +162,6 @@ function boot(): void {
     line('키보드 — 이동 W A S D · 상승 스페이스 · 하강 시프트', 'margin-top:20px;font-size:13px;color:#ffd9a8;line-height:2')
     line('마우스 — 왼쪽 드래그 시점 회전 · 휠 줌', 'font-size:13px;color:#ffd9a8;line-height:2')
     line('좌표 클릭 — 화면의 천체 이름을 누르면 그곳까지 자동 비행', 'font-size:13px;color:#ffd9a8;line-height:2')
-    line('자동 항법 — N 켜고 끄기 · 먹이와 다음 항로를 알아서 쫓는다', 'font-size:13px;color:#ffd9a8;line-height:2')
     line('J 명부 · H 질량 과부하(토글) · X 축 표시', 'font-size:12px;color:#6f8299;line-height:2')
     line('아무 키나 눌러 시작 — 그리고 우측 상단의 행복 버튼을 누른다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
     if (game.journal.length > 0) {
@@ -175,42 +174,33 @@ function boot(): void {
   showTitle()
 
   const wrapped = { move: { x: 0, y: 0 }, lift: 0 } as unknown as Input
-  // 자동 항법 — 나침반이 가리키는 것(먹이 우선, 없으면 다음 항로)을 추적하며
-  // 먹고 이동한다. 수동 입력이 오면 즉시 해제 ("주변거 잡아먹으면서 목적지로").
-  let autoNav = false
-  /** 라벨 클릭 목적지 — 도착(3화면)하면 해제되고 일반 항법으로 넘어간다 */
+  /** 라벨 클릭 목적지 — 그곳까지 자동 비행, 도착(3화면)하면 해제된다 */
   let navPick: { x: number; y: number; z: number; name: string } | null = null
   const autoSteer = (): void => {
+    if (!navPick) return
     const w = wrapped as unknown as { move: { x: number; y: number }; lift: number }
     const vh = game.camera.viewHeight
     // 도착 판정은 3D — xy 만 보면 z 가 수백만 남은 채 항법이 풀린다 ("z좌표 버그")
-    if (navPick && Math.hypot(navPick.x - game.x, navPick.y - game.y, navPick.z - game.z) < vh * 3) {
-      // 클릭 목적지 도착 — 항법을 끄고 그 자리에 선다 ("베가 찍고 바로 딴 데로": 실플레이)
+    if (Math.hypot(navPick.x - game.x, navPick.y - game.y, navPick.z - game.z) < vh * 3) {
       navPick = null
-      autoNav = false
       w.move.x = 0
       w.move.y = 0
       w.lift = 0
       return
     }
-    // 클릭 목적지 > 근처 실속 먹이 > 항로 ("자동항법 느림" 수리 유지)
-    const useRoute = !navPick && game.routeName !== null && game.preyDist > vh * 2.2
-    const tx = navPick ? navPick.x : useRoute ? game.routeX : game.preyX
-    const ty = navPick ? navPick.y : useRoute ? game.routeY : game.preyY
-    const tz = navPick ? navPick.z : useRoute ? game.routeZ : game.preyZ
-    const dx = tx - game.x
-    const dy = ty - game.y
+    const dx = navPick.x - game.x
+    const dy = navPick.y - game.y
     const d = Math.hypot(dx, dy) || 1
     const sp = Math.hypot(game.vx, game.vy)
     if (d < sp * 0.7 && sp > 1) {
-      // 도착 브레이크 — 항로든 먹이든, 지나치기 전에 역추진 (봇 검증 로직)
+      // 도착 브레이크 — 지나치기 전에 역추진
       w.move.x = -game.vx / sp
       w.move.y = -game.vy / sp
     } else {
       w.move.x = dx / d
       w.move.y = dy / d
     }
-    const dz = tz - game.z
+    const dz = navPick.z - game.z
     const zBand = Math.max(300, d * 0.2)
     w.lift = dz > zBand ? 1 : dz < -zBand ? -1 : 0
   }
@@ -254,19 +244,16 @@ function boot(): void {
       if (journalOpen) renderJournal()
     }
     if (input.consumePressed('x')) scene.axes.visible = !scene.axes.visible
-    if (input.consumePressed('n')) autoNav = !autoNav
     if (scene.pick) {
       navPick = scene.pick
-      autoNav = true
       scene.pick = null
     }
-    if (autoNav && (input.move.x !== 0 || input.move.y !== 0 || input.lift !== 0)) {
-      autoNav = false
+    if (navPick && (input.move.x !== 0 || input.move.y !== 0 || input.lift !== 0)) {
       navPick = null
     }
 
     if (!journalOpen) {
-      game.navAssist = autoNav
+      game.navAssist = navPick !== null
       game.surge = surgeOn
       // 클릭 목적지를 시뮬에 정식 전달 — 속도·제동·z 수렴이 전부 이 좌표 기준
       game.navOn = navPick !== null
@@ -274,9 +261,8 @@ function boot(): void {
         game.navX = navPick.x
         game.navY = navPick.y
         game.navZ = navPick.z
-      }
-      if (autoNav && (navPick || game.preyDist < Infinity)) autoSteer()
-      else steer()
+        autoSteer()
+      } else steer()
       game.update(wrapped, dt)
     }
     scene.resize()
@@ -350,7 +336,7 @@ function boot(): void {
       return v >= 10000 ? `${(v / 10000).toFixed(1)}만 광년`
         : v >= 0.1 ? `${v.toFixed(1)}광년` : `${Math.round(px / 1000)}k`
     }
-    const navTag = autoNav ? '  ·  자동 항법(N 해제)' : ''
+    const navTag = navPick ? '  ·  지정 항로(WASD 로 해제)' : ''
     // 클릭 지정 목적지가 있으면 HUD 도 그걸 말한다 ("찍었는데 왜 프록시마": 실플레이)
     const routeLine = navPick
       ? `\n지정 항로  ${navPick.name} · ${fmtLy(Math.hypot(navPick.x - game.x, navPick.y - game.y, navPick.z - game.z))}` +

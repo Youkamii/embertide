@@ -663,7 +663,7 @@ void main(){
     this.scene.add(this.disk)
     // 상대론적 쌍제트 — 회전축으로 collimated(가늘게 모인) 나선 빔 (M87 제트: 조사).
     // 가는 빛기둥이 뿌리서 솟아 나선으로 꼬이며 끝으로 흩어진다 (원뿔이 아니다).
-    const coneGeo = new THREE.CylinderGeometry(0.055, 0.055, 4.5, 20, 26, true)
+    const coneGeo = new THREE.CylinderGeometry(0.14, 0.14, 4.0, 20, 24, true)
     this.jetMat = new THREE.ShaderMaterial({
       uniforms: { uTime: { value: 0 }, uPower: { value: 0 } },
       vertexShader: `
@@ -1717,7 +1717,7 @@ void main(){
       const jet = this.jets[i]!
       const s = i === 0 ? 1 : -1
       jet.position.set(px, py + s * R * 2.6 * Math.max(0.3, power), pz)
-      jet.scale.set(R * (0.3 + power * 0.4), R * (0.9 + power * 3.2), R * (0.3 + power * 0.4))
+      jet.scale.set(R * (0.5 + power * 0.5), R * (0.5 + power * 0.9), R * (0.5 + power * 0.5))
     }
     this.jetMat.uniforms['uTime']!.value = t
     this.jetMat.uniforms['uPower']!.value = power
